@@ -1,0 +1,463 @@
+---
+title: "Charts for ECEMF model comparison analysis"
+output:
+  html_document:
+    theme: paper
+    toc: true
+    toc_float:
+      collapsed: false
+---
+
+<style>
+  .main-container {
+    max-width: 95% !important;
+  }
+  .toc-content {
+    padding-left: 0px !important;
+  }
+  .svg-container {
+    margin: auto !important;
+  }
+</style>
+
+<!-- Setting default chunk options -->
+```{r chunkOptions, echo=FALSE, include = FALSE}
+  knitr::opts_chunk$set(dev='svglite', # svg, png,...
+                        fig.ext = ".svg",
+                        #fig.asp = .8 # default aspect ratio
+                        fig.width = 12,
+                        fig.height = 8,
+                        dpi=100
+                        )
+```  
+
+
+```{r loading_packages, echo=FALSE, include = FALSE}
+
+  #Loading required packages
+  packagesList <- c("reticulate", "tidyr", "dplyr", "quitte", "openxlsx", "piamInterfaces", "ggplot2")
+  #packagesList <- c("quitte","ggplot2","geomtextpath","ggpattern","tidyr","grid","stringr","gridExtra","ggrepel","kableExtra","dplyr","remind2","rsvg","ggsvg")
+  packages <- suppressWarnings(suppressMessages(lapply(packagesList, function(x){ if(!require(x, character.only = T, quietly = T)){ install.packages(x); return(paste0("installed missing package: ", x)) } else paste0("required package is installed: ", x) } )))
+
+```
+
+
+```{r download_data, echo=FALSE, include = FALSE}
+
+  downloadData <- FALSE
+  
+  #to set credentials for accessing the ECEMF Scenario Explorer database please run the following script once in a Python console:
+  #import pyam
+  #pyam.iiasa.set_config("<username>", "<password>")
+  #Refer to this [tutorial](https://pyam-iamc.readthedocs.io/en/stable/tutorials/iiasa_dbs.html) for more information!
+  
+  dir.create("./data", recursive = TRUE, showWarnings = FALSE)
+
+  if(downloadData || length(list.dirs(path = "./data", full.names = TRUE, recursive = FALSE)) == 0){
+    
+    time <- format(Sys.time(), "%Y_%m_%d_%H.%M.%S")
+    dataPath <- paste0("./data/", time)
+    dir.create(dataPath, recursive = TRUE, showWarnings = FALSE)
+    
+    source_python("./download_iiasa_db.py")
+    
+    # Downloading metadata
+    print(paste0("Downloading metadata."))
+    download_iiasa_meta_py(fileName = paste0(dataPath, "/metadata_",time), db="ecemf_internal", default_only = TRUE)
+  
+    # Downloading data
+    print(paste0("Downloading data"))  
+    scenList <- c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc", "WP1 NetZero-ElecPush", "WP1 NetZero-H2Push", "WP1 NetZero-SynfPush", "WP1 NetZero-HighEfficiency")
+    download_iiasa_db_py(fileName = paste0(dataPath, "/WP1_allModels_" ,time), db="ecemf_internal", model="*", 
+                         scen=scenList, 
+                         region=c("EU27 & UK (*)", "EU27 (*)"))
+    
+    # Filtering downloaded data to retain only most up to date results 
+    
+      #auxiliary function to simplify model name
+      simplifyModelName <- function(model){
+        model <- gsub("v\\d*\\.?\\d*\\.?\\d*", "", model) # remove "v1.0.0"
+        model <- gsub(" \\d*\\.?\\d*\\.?\\d*", "", model) # remove "1.0.0"
+        model <- gsub(" \\d*\\.?\\d*", "", model) # remove "1.1"
+        model <- gsub("\\s$*", "", model) # remove trailing spaces
+        model <- gsub("\\_*$", "", model) # remove trailing underscores
+        model <- gsub("MESSAGEix-GLOBIOM","MESSAGE",model)
+        return(model)
+      }
+      
+      # table to filter most up to date results  
+      metaFilter <- openxlsx::read.xlsx(paste0(dataPath, "/metadata_", time,".xlsx")) %>%
+        tidyr::fill(model, .direction = "down") %>% # fill NAs with above row values
+        arrange(desc(create_date)) %>%
+        mutate(cleanModelName = simplifyModelName(model)) %>%
+        group_by(cleanModelName,scenario) %>% 
+        filter(row_number()==1) %>%
+        ungroup()
+    
+      # cleaning data from NAs, formatting issues, filtering only more recent data, and simplifying model names
+      data <- read.xlsx(paste0(dataPath, "/WP1_allModels_" , time ,".xlsx")) %>% 
+        as.quitte() %>% 
+        filter(!is.na(value)) %>%  
+        mutate(region = gsub("&amp;", "&", region)) %>% 
+        right_join(metaFilter %>% filter(scenario %in% scenList) %>% select(model,scenario), by = join_by(model, scenario)) %>%
+        mutate(model = simplifyModelName(model)) %>%
+        na.omit()
+    
+    write.xlsx(data %>% pivot_wider(names_from = period, values_from = value) %>% select(where(~!all(is.na(.x)))), file = paste0(dataPath, "/WP1_" , time,".xlsx"))
+  
+  }
+
+```
+  
+  
+```{r load_data, echo=FALSE, include = FALSE}
+  
+  # select data file
+  dataFolder <- sort(list.dirs(path = "./data", full.names = TRUE, recursive = FALSE), decreasing = T)[1]
+  time <- basename(dataFolder)
+  
+  dataFile <- paste0("./data/", time, "/WP1_", time, ".xlsx")
+  
+  df <- suppressWarnings(quitte::read.quitte(dataFile)) %>% 
+        filter(!is.na(value))
+  
+```  
+  
+
+```{r ,load_historical_mif, echo=FALSE, include = FALSE}
+
+#  if(file.exists("./hist/historical.rds")){
+#       hist <- readRDS("./hist/historical.rds")
+#  } else {
+#    # data directly from the historical mif
+#    hist <- piamInterfaces::convertHistoricalData(
+#      mif = "./hist/historical.mif",
+#      project = "ECEMF",
+#      regionMapping = "./hist/regionmapping_historical.csv"
+#    )
+#    saveRDS(hist,"./hist/historical.rds")
+#  }
+
+```  
+
+
+
+```{r create_charts, echo=FALSE, include=FALSE}
+
+  # creating charts
+  g <- NULL
+
+  # output folder
+  dir.create(paste0("./output/", time, "/svg"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(paste0("./output/", time, "/png"), recursive = TRUE, showWarnings = FALSE)
+
+``` 
+
+
+```{r aesthetics, echo=FALSE, include=FALSE}
+
+color <- c(
+  #model
+  "IMAGE" = "#00ffff",
+  "Euro-Calliope" = "#c0c0c0",
+  "MEESA" = "#ff00ff",
+  "x MEESA" = "#ff00ff",
+  "MESSAGE" = "#800080",
+  "OSeMBE" = "#a52a2a",
+  "x OSeMBE" = "#a52a2a",
+  "PRIMES" = "#0000ff",
+  "PROMETHEUS" = "#ffd900",
+  "REMIND" = "#ff6347",
+  "LIMES" = "#ffaf47",
+  "TIAM-ECN" = "#4682b4",
+  "WITCH" = "#228b22"
+)
+
+``` 
+
+
+# Emissions {.tabset}
+
+## GHG Emissions
+
+```{r ghg_emissions, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
+           region == "EU27 & UK (*)")
+  
+  g[["GHG_Emissions"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=scenario)) +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = c("WP1 NPI"="solid", "WP1 NetZero"="dashed", "WP1 NetZero-LimBio"="dotted", "WP1 NetZero-LimCCS"="dotdash", "WP1 NetZero-LimNuc"="longdash")) +
+      ggtitle("GHG Emissions") +
+      ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/GHG_Emissions.svg"), g[["GHG_Emissions"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/GHG_Emissions.png"), g[["GHG_Emissions"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+
+  g[["GHG_Emissions"]]
+
+```
+
+
+## GHG Emissions reductions vs 2020
+
+```{r ghg_emissions_reductions_vs_2020, echo=FALSE, include=FALSE}
+
+
+  plotData <- left_join(
+      df %>%
+        filter(variable == "Emissions|Kyoto Gases",
+               period %in% c(2030,2040,2050),
+               scenario == "WP1 NetZero",
+               region == "EU27 & UK (*)") %>%
+        mutate(numerator=value)
+      ,
+      df %>%
+        filter(variable == "Emissions|Kyoto Gases",
+               period == 2020,
+               scenario == "WP1 NetZero",
+               region == "EU27 & UK (*)") %>%
+        mutate(denominator=value) %>%
+        select(model,denominator)
+      , by = join_by(model == model)
+      ) %>%
+    mutate(percentage = numerator/denominator,
+           reduction = 1-percentage) %>%
+    na.omit()
+
+  g[["GHG_Emissions_Reductions_vs_2020"]] <-  ggplot(plotData,aes(x=model,y=reduction,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = "#cccccc") +
+    ylab("GHG Emissions Reductions vs 2020 (%)") +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1), breaks = seq(0, 1, by = 0.2)) +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5)) +
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/GHG_Emissions_Reductions_vs_2020.svg"), g[["GHG_Emissions_Reductions_vs_2020"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_2020.png"), g[["GHG_Emissions_Reductions_vs_2020"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+
+  g[["GHG_Emissions_Reductions_vs_2020"]]
+
+```
+
+
+# Shares {.tabset}
+
+## Final Energy Electricity shares
+
+```{r Final_Energy_Electricity_Share, echo=FALSE, include=FALSE}
+
+  df <- calc_addVariable(df, "`Final Energy|Electricity Share`" = "`Final Energy|Electricity` / `Final Energy`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Industry|Electricity Share`" = "`Final Energy|Industry|Electricity` / `Final Energy|Industry`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Electricity Share`" = "`Final Energy|Residential and Commercial|Electricity` / `Final Energy|Residential and Commercial`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Transportation|Electricity Share`" = "`Final Energy|Transportation|Electricity` / `Final Energy|Transportation`", units = "%")
+
+  vars <- list(
+    "Total"=c(
+      "Final Energy|Electricity Share"
+    ),
+    "Industry"=c(
+      "Final Energy|Industry|Electricity Share"
+    ),
+    "Buildings"=c(
+      "Final Energy|Residential and Commercial|Electricity Share"
+    ),
+    "Transport"=c(
+      "Final Energy|Transportation|Electricity Share"
+    )
+  )
+  
+  varTosector <- setNames(names(unlist(vars)),unlist(vars))
+  
+  plotData <- df %>%
+    filter(variable %in% names(varTosector),
+           period >=2005, period <= 2050,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)") %>%
+    mutate(sector = factor(varTosector[as.character(variable)], labels=c("Total","Industry","Buildings","Transport")))
+
+  g[["Final_Energy_Electricity_Share"]] <- ggplot(plotData,aes(x=period,y=value)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(size=1,aes(color=model)) +
+    geom_point(aes(color=model)) +
+    theme_minimal(base_size = 24) +
+    facet_wrap(~sector) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1), breaks = seq(0, 1, by = 0.2), limits = c(0,1)) +
+    scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+    ylab("Final Energy Electricity shares (%)") +
+    theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/Final_Energy_Electricity_Share.svg"), g[["Final_Energy_Electricity_Share"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Final_Energy_Electricity_Share.png"), g[["Final_Energy_Electricity_Share"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+
+  g[["Final_Energy_Electricity_Share"]]
+
+```
+
+
+## Final Energy Hydrogen shares
+
+```{r Final_Energy_Hydrogen_Share, echo=FALSE, include=FALSE}
+
+  df <- calc_addVariable(df, "`Final Energy|Hydrogen Share`" = "`Final Energy|Hydrogen` / `Final Energy`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Industry|Hydrogen Share`" = "`Final Energy|Industry|Hydrogen` / `Final Energy|Industry`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Hydrogen Share`" = "`Final Energy|Residential and Commercial|Hydrogen` / `Final Energy|Residential and Commercial`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Transportation|Hydrogen Share`" = "`Final Energy|Transportation|Hydrogen` / `Final Energy|Transportation`", units = "%")
+
+  vars <- list(
+    "Total"=c(
+      "Final Energy|Hydrogen Share"
+    ),
+    "Industry"=c(
+      "Final Energy|Industry|Hydrogen Share"
+    ),
+    "Buildings"=c(
+      "Final Energy|Residential and Commercial|Hydrogen Share"
+    ),
+    "Transport"=c(
+      "Final Energy|Transportation|Hydrogen Share"
+    )
+  )
+  
+  varTosector <- setNames(names(unlist(vars)),unlist(vars))
+  
+  plotData <- df %>%
+    filter(variable %in% names(varTosector),
+           period >=2005, period <= 2050,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)") %>%
+    mutate(sector = factor(varTosector[as.character(variable)], labels=c("Total","Industry","Buildings","Transport")))
+
+  g[["Final_Energy_Hydrogen_Share"]] <- ggplot(plotData,aes(x=period,y=value)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(size=1,aes(color=model)) +
+    geom_point(aes(color=model)) +
+    theme_minimal(base_size = 24) +
+    facet_wrap(~sector) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1), breaks = seq(0, 1, by = 0.2), limits = c(0,1)) +
+    scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+    ylab("Final Energy Hydrogen shares (%)") +
+    theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/Final_Energy_Hydrogen_Share.svg"), g[["Final_Energy_Hydrogen_Share"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Final_Energy_Hydrogen_Share.png"), g[["Final_Energy_Hydrogen_Share"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+
+  g[["Final_Energy_Hydrogen_Share"]]
+
+```
+
+
+# Electricty {.tabset}
+
+## NetZero
+
+```{r, echo=FALSE, include=FALSE}
+
+vars <- c(
+#  "Curtailment"="Secondary Energy|Electricity|Curtailment",
+  "Ocean" = "Secondary Energy|Electricity|Ocean",
+  "Biomass"="Secondary Energy|Electricity|Biomass",
+  "Coal"="Secondary Energy|Electricity|Coal",
+  "Gas"="Secondary Energy|Electricity|Gas",
+  "Geothermal"="Secondary Energy|Electricity|Geothermal",
+  "Hydro"="Secondary Energy|Electricity|Hydro",
+  "Hydrogen"="Secondary Energy|Electricity|Hydrogen",
+  "Nuclear"="Secondary Energy|Electricity|Nuclear",
+  "Oil"="Secondary Energy|Electricity|Oil",
+  "Solar"="Secondary Energy|Electricity|Solar",
+  "Wind"="Secondary Energy|Electricity|Wind",
+  #"Wind Offshore"="Secondary Energy|Electricity|Wind|Offshore",
+  #"Wind Onshore"="Secondary Energy|Electricity|Wind|Onshore",
+  "Trade"="Trade|Secondary Energy|Electricity|Volume"
+)
+
+carrier_color <- c(  
+  "Ocean" = "#5ed5f0",
+  "Biomass" = "#005900",
+  "Coal" = "#0c0c0c",
+  "Gas" = "#999959",
+  "Geothermal" = "#e51900",
+  "Hydro" = "#191999",
+  "Hydrogen"    = "#5ed5b0",
+  "Nuclear" = "#ff33ff",
+  "Oil" = "#b30000",
+  "Solar" = "#ffcc00",
+  "Wind" = "#337fff",
+  "Trade" = "#5c5c5c")
+
+  plotData <- df %>%
+    filter(variable %in% vars,
+           period %in% c(2020,2030,2040,2050),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)") %>%
+    mutate(value = value*277.7777778, # EJ 2 TWh
+           model = factor(model, levels = c("LIMES", "Euro-Calliope","IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+           variable = factor(variable, levels = vars)) #order
+  
+  g[["Electricty_NZero"]] <- ggplot(plotData,aes(x=model,y=value,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
+    ggtitle("Electricity Generation") +
+    ylab("TWh") +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/Electricty_NZero.svg"), g[["Electricty_NZero"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Electricty_NZero.png"), g[["Electricty_NZero"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+
+  g[["Electricty_NZero"]]
+
+```
