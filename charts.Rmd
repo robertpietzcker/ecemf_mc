@@ -1204,30 +1204,33 @@ carrier_color <- c(
 ### Sol + Liq + Gas in SE
 ```{r, echo=FALSE, include=FALSE}
 
-vars2 <- c(
-    "BioGas"="Secondary Energy|Gases|Biomass",
+vars <- c(
+  "BioGas"="Secondary Energy|Gases|Biomass",
   "SynGas" = "Secondary Energy|Gases|Electricity",
   "FossGas"="Secondary Energy|Gases|Fossil",
+  "Imported SynLiq" = "SE-Import|Liquids|Synfuel",
+  "Imported BioLiq" = "SE-Import|Liquids|Bio",
+  "Imported FossLiq" = "SE-Import|Liquids|Fossil",
   "BioLiq"="Secondary Energy|Liquids|Biomass",
-  "Synliq" = "Secondary Energy|Liquids|Electricity",
+  "SynLiq" = "Secondary Energy|Liquids|Electricity",
   "FossLiq"="Secondary Energy|Liquids|Fossil",
-    "BioSolids"="Secondary Energy|Solids|Biomass",
+  "BioSolids"="Secondary Energy|Solids|Biomass",
   "FossSolids"="Secondary Energy|Solids|Fossil"
   )
 
-vars <- c(
-  "SynGas" = "Secondary Energy|Gases|Electricity",
-  "SynLiq" = "Secondary Energy|Liquids|Electricity",
-  "Imported SynLiq" = "SE-Import|Liquids|Synfuel",
-  "Imported BioLiq" = "SE-Import|Liquids|Bio",
-      "BioGas"="Secondary Energy|Gases|Biomass",
-      "BioLiq"="Secondary Energy|Liquids|Biomass",
-      "BioSolids"="Secondary Energy|Solids|Biomass",
-  "FossGas"="Secondary Energy|Gases|Fossil",
-  "Imported FossLiq" = "SE-Import|Liquids|Fossil",
-  "FossLiq"="Secondary Energy|Liquids|Fossil",
-  "FossSolids"="Secondary Energy|Solids|Fossil"
-  )
+# vars <- c(          # other stacking order for nicer fossil/bio/syn-split
+#   "SynGas" = "Secondary Energy|Gases|Electricity",
+#   "SynLiq" = "Secondary Energy|Liquids|Electricity",
+#   "Imported SynLiq" = "SE-Import|Liquids|Synfuel",
+#   "Imported BioLiq" = "SE-Import|Liquids|Bio",
+#       "BioGas"="Secondary Energy|Gases|Biomass",
+#       "BioLiq"="Secondary Energy|Liquids|Biomass",
+#       "BioSolids"="Secondary Energy|Solids|Biomass",
+#   "FossGas"="Secondary Energy|Gases|Fossil",
+#   "Imported FossLiq" = "SE-Import|Liquids|Fossil",
+#   "FossLiq"="Secondary Energy|Liquids|Fossil",
+#   "FossSolids"="Secondary Energy|Solids|Fossil"
+#   )
 
 carrier_color <- c(  
   "BioSolids" = "#005900",
@@ -1276,7 +1279,7 @@ carrier_color <- c(
 ### Sol + Liq + Gas in FE
 ```{r, echo=FALSE, include=FALSE}
 
-vars2 <- c(
+vars <- c(
     "BioGas"="Final Energy|Gases|Biomass",
   "SynGas" = "Final Energy|Gases|Electricity",
   "FossGas"="Final Energy|Gases|Fossil",
@@ -1287,22 +1290,21 @@ vars2 <- c(
   "FossSolids"="Final Energy|Solids|Fossil"
   )
 
-vars <- c(
-  "SynGas" = "Final Energy|Gases|Electricity",
-  "Synliq" = "Final Energy|Liquids|Electricity",
-      "BioGas"="Final Energy|Gases|Biomass",
-      "BioLiq"="Final Energy|Liquids|Biomass",
-      "BioSolids"="Final Energy|Solids|Biomass",
-  "FossGas"="Final Energy|Gases|Fossil",
-  "FossLiq"="Final Energy|Liquids|Fossil",
-  "FossSolids"="Final Energy|Solids|Fossil"
-  )
+# vars <- c(               # other stacking order for nicer fossil/bio/syn-split
+#   "SynGas" = "Final Energy|Gases|Electricity",
+#   "Synliq" = "Final Energy|Liquids|Electricity",
+#       "BioGas"="Final Energy|Gases|Biomass",
+#       "BioLiq"="Final Energy|Liquids|Biomass",
+#       "BioSolids"="Final Energy|Solids|Biomass",
+#   "FossGas"="Final Energy|Gases|Fossil",
+#   "FossLiq"="Final Energy|Liquids|Fossil",
+#   "FossSolids"="Final Energy|Solids|Fossil"
+#   )
 
 carrier_color <- c(  
   "BioSolids" = "#005900",
   "FossSolids" = "#0c0c0c",
     "Synliq" = "#0177d4",
-  "Imported Synliq" = "#0ed2f5",
   "BioLiq" = "#23ae1a",
   "FossLiq" = "#727272",
     "SynGas" = "#5ed5f0",
