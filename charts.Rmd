@@ -388,7 +388,7 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
 
 ## Power sector emissions - fewer models
 
-```{r CO2_electricitySupply, echo=FALSE, include=FALSE}
+```{r CO2_electricitySupply_filtered, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
     filter(variable == "Emissions|CO2|Energy|Supply|Electricity",
@@ -541,9 +541,10 @@ carrier_color <- c(
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["CC_origin_StBar"]]
 ```
+
 ## non-CO2 Emissions
 
-```{r ghg_emissions, echo=FALSE, include=FALSE}
+```{r nonCO2_emissions, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
     filter(variable == "Emi|Kyoto Gases|non-CO2 calc",
@@ -581,7 +582,7 @@ carrier_color <- c(
 
 # Carbon prices {.tabset}
 ## Carbon price line plot
-```{r CC_line, echo=FALSE, include=FALSE}
+```{r CarbonPrice_line, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
     filter(variable == "Price|Carbon",
@@ -645,7 +646,9 @@ carrier_color <- c(
 ```
 
 ```{r calculate_SEshares, echo=FALSE, include = FALSE}
-  df <- calc_addVariable(df, "`SE-Import|Liquids|Synfuel`" = " -`Trade|Secondary Energy|Liquids|Electricity|Volume`", units = "EJ/yr")
+
+  if("Trade|Secondary Energy|Liquids|Electricity|Volume" %in% unique(df$variable))
+    df <- calc_addVariable(df, "`SE-Import|Liquids|Synfuel`" = " -`Trade|Secondary Energy|Liquids|Electricity|Volume`", units = "EJ/yr")
   df <- calc_addVariable(df, "`SE-Import|Liquids|Fossil`" = " -`Trade|Secondary Energy|Liquids|Oil|Volume` - `Trade|Secondary Energy|Liquids|Coal|Volume` - `Trade|Secondary Energy|Liquids|Gas|Volume`", units = "EJ/yr")
   df <- calc_addVariable(df, "`SE-Import|Liquids|Bio`" = " -`Trade|Secondary Energy|Liquids|Biomass|Volume` ", units = "EJ/yr")
   
@@ -666,7 +669,7 @@ carrier_color <- c(
   df <- calc_addVariable(df, "`SE|Solids|SumOfShares`" = "`SE|Solids|Fossil Share` + `SE|Solids|Bio Share`", units = "%", completeMissing = TRUE)
 ```
 
-```{r calculate_SEshares, echo=FALSE, include = FALSE}
+```{r calculate_SEshares_2, echo=FALSE, include = FALSE}
 df <- calc_addVariable(df, "`SE|SolLiqGas`" = "`Secondary Energy|Liquids` + `Secondary Energy|Solids` + `Secondary Energy|Gases`", units = "%")
 df <- calc_addVariable(df, "`SE|SolLiqGas|Bio`" = "`Secondary Energy|Liquids|Biomass` + `Secondary Energy|Solids|Biomass` + `Secondary Energy|Gases|Biomass`", units = "%", completeMissing = TRUE)
 df <- calc_addVariable(df, "`SE|SolLiqGas|Fossil`" = "`Secondary Energy|Liquids|Fossil` + `Secondary Energy|Solids|Fossil` + `Secondary Energy|Gases|Fossil`", units = "%", completeMissing = TRUE)
@@ -1503,7 +1506,7 @@ carrier_color <- c(
 
 ## SE H2 line
 
-```{r SE_H2_line, echo=FALSE, include=FALSE}
+```{r SEFE_H2_line, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
     filter(variable %in% c("Final Energy|Hydrogen","Secondary Energy|Hydrogen"),
