@@ -308,6 +308,68 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   g[["GHG_Emissions_Reductions_vs_2020"]]
 ```
 
+## GHG Emissions reductions vs 2020 - range
+
+```{r ghg_emissions_reductions_vs_2020_range, echo=FALSE, include=FALSE}
+
+
+  plotData <- left_join(
+      df %>%
+        filter(variable == "Emissions|Kyoto Gases",
+               period >= 2010, period <= 2050,
+               scenario == "WP1 NetZero",
+               region == "EU27 & UK (*)") %>%
+        mutate(numerator=value)
+      ,
+      df %>%
+        filter(variable == "Emissions|Kyoto Gases",
+               period == 2020,
+               scenario == "WP1 NetZero",
+               region == "EU27 & UK (*)") %>%
+        mutate(denominator=value) %>%
+        select(model,denominator)
+      , by = join_by(model == model)
+      ) %>%
+    mutate(percentage = numerator/denominator,
+           reduction = 1-percentage) %>%
+    na.omit() %>%
+    group_by(period) %>%
+    summarise_at(vars(reduction), list(
+      Min = min,
+      Mean = mean,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  g[["GHG_Emissions_Reductions_vs_2020_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    #geom_line(data=h,linewidth=1,aes(linetype=Source)) +
+    #geom_point() +
+    theme_minimal(base_size = 24) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+    ylab("GHG Emissions Reductions vs 2020 (%)")
+  
+
+  ggsave(paste0("./output/", time, "/svg/GHG_Emissions_Reductions_vs_2020_range.svg"), g[["GHG_Emissions_Reductions_vs_2020_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_2020_range.png"), g[["GHG_Emissions_Reductions_vs_2020_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["GHG_Emissions_Reductions_vs_2020_range"]]
+```
+
 ## CO2 Emissions
 
 ```{r CO2_Emi_EnergyIndustrProc, echo=FALSE, include=FALSE}
