@@ -2162,3 +2162,217 @@ carrier_color <- c(
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["Trade"]]
 ```
+
+
+```{r, echo=FALSE}
+
+### LULUCF
+
+# It is necessary to check also if hist data covers all years 
+hist_lulucf <- histOrigN %>% 
+  filter(variable == "Emi|CO2|Land-Use Change",
+         period >= 2018, period <= 2022,
+         region == "EUR",
+         model == "UNFCCC") %>%
+  summarize(Mean = mean(value, na.rm=TRUE)) %>%
+  pull(Mean)
+
+# Type 1: Model has AFOLU CO2 data reported (equivalent to LULUCF). 
+df_type1_orig <- df %>% # reported afolu data models
+  filter(variable == "Emissions|CO2|AFOLU",
+         period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)") %>%
+  group_by(model) %>%
+  filter(sum(value*value) != 0) %>%
+  ungroup()
+
+model_w_lulucf <- df_type1_orig %>%
+  pull(model) %>%
+  unique()
+
+df_lulucf_adj <- left_join( # calculating adjustment factors based on 2020 historical values
+  df_type1_orig,
+  df_type1_orig %>%
+    filter(period == 2020) %>%
+    mutate(hist2020 = hist_lulucf,
+           multFactor = hist_lulucf / value,
+           diffFactor = hist_lulucf - value) %>%
+    select(-period, -value),
+  by = join_by(model == model, scenario == scenario, region == region, variable == variable, unit == unit)
+  ) %>%
+  mutate(
+    valueAdjMult = value * multFactor,
+    valueAdjDiff = value + diffFactor
+  )
+
+df_lulucf_w_data <- df_lulucf_adj %>% # calculating the adjusted data using the difference between historical values to translate the model values instead of using a multiplicative factor
+  mutate(value = valueAdjDiff) %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+# Type 2: Model has no CO2 AFOLU data reported
+model_wo_lulucf <- df %>% filter(!(model %in% model_w_lulucf)) %>% pull(model) %>% unique() 
+
+df_lulucf_wo_data <- full_join( #assigning synthetic value to Emissions|CO2|AFOLU
+  df_lulucf_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
+  data.frame(model=rep(model_wo_lulucf,each=4), period=rep(c(2020,2030,2040,2050),length(model_wo_lulucf)), value = rep(c(hist_lulucf, -310, -310, -310),length(model_wo_lulucf))),
+  by = join_by(period == period)
+  )
+
+# Synthetic CO2 AFOLU data
+df_lulucf <- rbind(
+  df_lulucf_w_data,
+  df_lulucf_wo_data
+  ) %>%
+  mutate(variable = "Emissions|CO2|AFOLU synthetic")
+
+
+### non GHG
+
+# It is necessary to check also if hist data covers all years 
+hist_nonCO2 <- histOrigN %>% 
+  filter(period >= 2018, period <= 2022,
+         region == "EUR",
+         model == "UNFCCC") %>%
+  calc_addVariable("`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr", only.new = TRUE) %>% 
+  summarize(Mean = mean(value, na.rm=TRUE)) %>%
+  pull(Mean)
+
+# Type A: Models that include non-CO2 emissions
+model_w_nonCO2 <- df %>% # reported afolu data models
+  filter(variable == "Emissions|Kyoto Gases",
+         period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)") %>%
+  group_by(model) %>%
+  filter(sum(value*value) != 0) %>%
+  ungroup() %>%
+  pull(model) %>%
+  unique()
+
+df_typeA_orig <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases` - `Emissions|CO2`", units = "MtCO2e/yr", only.new = TRUE) %>%
+  filter(period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)",
+         model %in% model_w_nonCO2) 
+
+df_nonCO2_adj <- left_join( # calculating adjustment factors based on 2020 historical values
+  df_typeA_orig,
+  df_typeA_orig %>%
+    filter(period == 2020) %>%
+    mutate(hist2020 = hist_nonCO2,
+           multFactor = hist_nonCO2 / value,
+           diffFactor = hist_nonCO2 - value) %>%
+    select(-period, -value),
+  by = join_by(model == model, scenario == scenario, region == region, variable == variable, unit == unit)
+  ) %>%
+  mutate(
+    valueAdjMult = value * multFactor,
+    valueAdjDiff = value + diffFactor
+  )
+
+df_nonCO2_w_data <- df_nonCO2_adj %>% # calculating the adjusted data using the difference between historical values to translate the model values instead of using a multiplicative factor
+  mutate(value = valueAdjDiff) %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+
+# Type B: Model has no GHG data reported
+model_wo_nonCO2 <- df %>% filter(!(model %in% model_w_nonCO2)) %>% pull(model) %>% unique() 
+
+df_nonCO2_wo_data <- full_join( #assigning synthetic value to Emissions|CO2|AFOLU
+  df_nonCO2_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
+  data.frame(model=rep(model_wo_nonCO2,each=4), period=rep(c(2020,2030,2040,2050),length(model_wo_nonCO2)), value = rep(c(hist_nonCO2, 580, 520, 510),length(model_wo_nonCO2))),
+  by = join_by(period == period)
+  )
+
+# Synthetic CO2 AFOLU data
+df_nonCO2 <- rbind(
+  df_nonCO2_w_data,
+  df_nonCO2_wo_data
+  ) %>%
+  mutate(variable = "Emissions|Kyoto Gases|non-CO2 synthetic")
+
+# adding synthetic data to main data
+df <- rbind(
+  df %>% filter(!(variable %in% c("Emissions|CO2|AFOLU synthetic","Emissions|Kyoto Gases|non-CO2 synthetic"))),
+  df_lulucf,
+  df_nonCO2
+  )
+
+```
+
+# Synthetic data {.tabset}
+## Synthetic LULUCF line plot
+```{r lulucf_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|CO2|AFOLU synthetic",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           region == "EU27 & UK (*)")
+
+
+  histDataOrigN <- histOrigN %>%
+    filter(variable == "Emi|CO2|Land-Use Change",
+           region == "EUR",
+           model == "UNFCCC")
+  
+  g[["lulucf_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
+      ggtitle("LULUCF") +
+      ylab("Mt CO2/yr") +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/lulucf_line.png"), g[["lulucf_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["lulucf_line"]]
+```
+
+## Synthetic non-CO2 emissions line plot
+```{r lulucf_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases|non-CO2 synthetic",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           region == "EU27 & UK (*)")
+
+  histDataOrigN <- histOrigN %>%
+    filter(region == "EUR",
+           model == "UNFCCC") %>%
+    calc_addVariable("`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr", only.new = TRUE)
+  
+  g[["nonCO2_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
+      ggtitle("non-CO2 emissions") +
+      ylab("Mt CO2/yr") +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/nonCO2_line.png"), g[["nonCO2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["nonCO2_line"]]
+```
