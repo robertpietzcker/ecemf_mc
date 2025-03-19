@@ -2351,7 +2351,7 @@ df <- rbind(
       scale_linetype_manual(values = modelLinetype) +
 #     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
       ggtitle("non-CO2 emissions (synthetic)") +
-      ylab("Mt CO2/yr") +
+      ylab("Mt CO2e/yr") +
       theme(axis.title.x=element_blank(),
           panel.background = element_rect(fill="#FFFFFF", color = NA),
           plot.background = element_rect(fill="#FFFFFF", color = NA))
@@ -2362,3 +2362,59 @@ df <- rbind(
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["nonCO2_line"]]
 ```
+
+
+
+```{r, echo=FALSE, include=FALSE}
+
+  df <- rbind(
+    df %>% filter(variable != "Emissions|Kyoto Gases synthetic"),
+    df %>%
+      filter(variable %in% c("Emissions|CO2|Energy and Industrial Processes" , "Emissions|CO2|Other" , "Emissions|CO2|Waste" , "Emissions|CO2|Other Removal" , "Emissions|CO2|AFOLU synthetic" , "Emissions|Kyoto Gases|non-CO2 synthetic")) %>%
+      group_by(model, scenario, region, period) %>%
+      summarize(value = sum(value)) %>%
+      mutate(variable = "Emissions|Kyoto Gases synthetic",
+             unit = "MtCO2e/yr") %>%
+      relocate(any_of(colnames(df)))
+    )
+  
+```
+
+## Synthetic GHG emissions line plot
+```{r syntheticGHG_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases synthetic",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           region == "EU27 & UK (*)")
+
+  histDataOrigN <- histOrigN %>%
+    filter(region == "EUR",
+           model == "UNFCCC",
+           variable == "Emi|GHG")
+  
+  g[["GHG_synthetic_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
+      ggtitle("GHG emissions (synthetic)") +
+      ylab("Mt CO2e/yr") +
+      theme(axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/GHG_synthetic_line.png"), g[["GHG_synthetic_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["GHG_synthetic_line"]]
+```
+
