@@ -145,7 +145,7 @@ output:
    # data directly from the historical mif
    histOrigN <- suppressWarnings(quitte::read.quitte("./hist/historical.mif")) %>% 
         filter(!is.na(value) )
-   histOrigN <- filter(histOrigN, period > 1990)
+   histOrigN <- filter(histOrigN, period >= 1990)
    saveRDS(histOrigN,"./hist/historical_origName.rds")
  }
 
@@ -308,28 +308,33 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   g[["GHG_Emissions_Reductions_vs_2020"]]
 ```
 
-## GHG Emissions reductions vs 2020 - range
+## GHG Emissions reductions vs 1990 - range
 
 ```{r ghg_emissions_reductions_vs_2020_range, echo=FALSE, include=FALSE}
 
+#PRIMES is not reporting Emissions|Kyoto Gases
 
-  plotData <- left_join(
-      df %>%
-        filter(variable == "Emissions|Kyoto Gases",
-               period >= 2010, period <= 2050,
-               scenario == "WP1 NetZero",
-               region == "EU27 & UK (*)") %>%
-        mutate(numerator=value)
-      ,
-      df %>%
-        filter(variable == "Emissions|Kyoto Gases",
-               period == 2020,
-               scenario == "WP1 NetZero",
-               region == "EU27 & UK (*)") %>%
-        mutate(denominator=value) %>%
-        select(model,denominator)
-      , by = join_by(model == model)
-      ) %>%
+models_without_data <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
+           period >= 2010, period <= 2050,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)") %>%
+    group_by(model) %>%
+    filter(sum(value*value) == 0) %>%
+    pull(model) %>%
+    unique()
+
+if(length(models_without_data) > 0)
+  warning(paste0("Models that do not report `Emissions|Kyoto Gases` and that are excluded from this chart: ", models_without_data))
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
+           period >= 2010, period <= 2050,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)", 
+           !(model %in% models_without_data)) %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
+           numerator=value) %>%
     mutate(percentage = numerator/denominator,
            reduction = 1-percentage) %>%
     na.omit() %>%
@@ -343,7 +348,7 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
       Q1=~quantile(., probs = 0.25),
       Q3=~quantile(., probs = 0.75)))
 
-  g[["GHG_Emissions_Reductions_vs_2020_range"]] <- 
+  g[["GHG_Emissions_Reductions_vs_1990_range"]] <- 
     ggplot(plotData,aes(x=period,y=Median)) +
     geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
     geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
@@ -359,15 +364,15 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
     theme(legend.position="none",
           panel.background = element_rect(fill="#FFFFFF", color = NA),
           plot.background = element_rect(fill="#FFFFFF", color = NA)) +
-    ylab("GHG Emissions Reductions vs 2020 (%)")
+    ylab("GHG Emissions Reductions vs 1990 (%)")
   
 
-  ggsave(paste0("./output/", time, "/svg/GHG_Emissions_Reductions_vs_2020_range.svg"), g[["GHG_Emissions_Reductions_vs_2020_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
-  ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_2020_range.png"), g[["GHG_Emissions_Reductions_vs_2020_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/svg/GHG_Emissions_Reductions_vs_1990_range.svg"), g[["GHG_Emissions_Reductions_vs_1990_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_1990_range.png"), g[["GHG_Emissions_Reductions_vs_1990_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["GHG_Emissions_Reductions_vs_2020_range"]]
+  g[["GHG_Emissions_Reductions_vs_1990_range"]]
 ```
 
 ## CO2 Emissions
