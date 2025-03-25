@@ -151,6 +151,37 @@ output:
 
 ```  
 
+<!-- additional data -->
+
+```{r additional_data, echo=FALSE, include = FALSE}
+
+# Emissions|Kyoto Gases reduction vs 1990
+models_without_data <- df %>% #PRIMES is not reporting Emissions|Kyoto Gases
+    filter(variable == "Emissions|Kyoto Gases",
+           region == "EU27 & UK (*)") %>%
+    group_by(model) %>%
+    filter(sum(value*value) == 0) %>%
+    pull(model) %>%
+    unique()
+
+if(length(models_without_data) > 0)
+  warning(paste0("Models that do not report `Emissions|Kyoto Gases` and that are excluded from the variable is chart: ", models_without_data))
+
+tmp <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
+           region == "EU27 & UK (*)", 
+           !(model %in% models_without_data)) %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(value = 1-(numerator/denominator),
+           variable = "Emissions|Kyoto Gases reduction vs 1990",
+           unit = "%") %>%
+    na.omit() %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+df <- rbind(df, tmp) 
+
+```
 
 
 ```{r create_charts, echo=FALSE, include=FALSE}
@@ -312,34 +343,15 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
 
 ```{r ghg_emissions_reductions_vs_2020_range, echo=FALSE, include=FALSE}
 
-#PRIMES is not reporting Emissions|Kyoto Gases
 
-models_without_data <- df %>%
-    filter(variable == "Emissions|Kyoto Gases",
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases reduction vs 1990",
            period >= 2010, period <= 2050,
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
-    group_by(model) %>%
-    filter(sum(value*value) == 0) %>%
-    pull(model) %>%
-    unique()
-
-if(length(models_without_data) > 0)
-  warning(paste0("Models that do not report `Emissions|Kyoto Gases` and that are excluded from this chart: ", models_without_data))
-
-  plotData <- df %>%
-    filter(variable == "Emissions|Kyoto Gases",
-           period >= 2010, period <= 2050,
-           scenario == "WP1 NetZero",
-           region == "EU27 & UK (*)", 
-           !(model %in% models_without_data)) %>%
-    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
-           numerator=value) %>%
-    mutate(percentage = numerator/denominator,
-           reduction = 1-percentage) %>%
-    na.omit() %>%
     group_by(period) %>%
-    summarise_at(vars(reduction), list(
+    summarise_at(vars(value), list(
       Min = min,
       Mean = mean,
       Median = median,
