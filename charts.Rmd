@@ -149,9 +149,24 @@ output:
    saveRDS(histOrigN,"./hist/historical_origName.rds")
  }
 
-```  
+```
 
 <!-- additional data -->
+
+```{r additional_hist_data, echo=FALSE, include = FALSE}
+
+# Emissions|Kyoto Gases reduction vs 1990
+histOrigN <- rbind(
+  histOrigN,
+  histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG") %>%
+    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
+           value = value / histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value)),
+  histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG") %>%
+    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
+           value = value / histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value))
+)
+
+```
 
 ```{r additional_data, echo=FALSE, include = FALSE}
 
