@@ -318,6 +318,9 @@ df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Final Energy|Gases|Fossil`" = "
 # unclear if synliqs should be shifted from h2 to elec, or if they are wrongly reported
 df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Final Energy|Solids|Fossil`" = "`Final Energy|Solids` - `Final Energy|Solids|Biomass`", units = "EJ/yr") # WITCH only reports the biomass solids explicitly 
 df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Emissions|CO2|Other Removal`" = "-`Carbon Removal|Geological Storage`", units = "EJ/yr") # WITCH has DACCS 
+df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Carbon Removal|Geological Storage|BioWITCH`" = "-`Carbon Capture|Storage|Biomass`", units = "EJ/yr") # WITCH has BECCS not reported under geological removals 
+
+
 df <- rbind(df_woWITCH, df_onlyWITCH)
 
 df_woModel   <- filter(df, !model %in% modelsFullSystem )
@@ -549,9 +552,9 @@ df_lulucf_adj <- left_join( # calculating adjustment factors based on 2020 histo
   df_type1_orig,
   df_type1_orig %>%
     filter(period == 2020) %>%
-    mutate(hist2020 = hist_lulucf,
-           multFactor = hist_lulucf / value,
-           diffFactor = hist_lulucf - value) %>%
+    mutate(hist2020 = hist_lulucf_2020,
+           multFactor = hist_lulucf_2020 / value,
+           diffFactor = hist_lulucf_2020 - value) %>%
     select(-period, -value),
   by = join_by(model == model, scenario == scenario, region == region, variable == variable, unit == unit)
   ) %>%
@@ -1152,6 +1155,7 @@ vars <- c(
   "GrossSupply-Elec"     = "Gross Emissions|CO2|Energy|Supply|Electricity",
   "AFOLU synth"     = "Emissions|CO2|AFOLU synthetic",
   "CarbRemov Geo"     = "Carbon Removal|Geological Storage",
+  "CarbRemov Geo2"     = "Carbon Removal|Geological Storage|BioWITCH",
   "Total GrossEnInd"     = "Gross Emissions|CO2|Energy and Industrial Processes",
   "Total CO2"       = "Emissions|CO2",
   "Total EnInd"     = "Emissions|CO2|Energy and Industrial Processes",
@@ -1178,7 +1182,8 @@ carrier_color <- c(
   "GrossSupply-Heat" = "#b30000",
   "GrossSupply-Elec" = "#fcec35",
   "AFOLU synth"    = "darkgreen",
-  "CarbRemov Geo"    = "red")
+  "CarbRemov Geo"    = "red", 
+  "CarbRemov Geo2"    = "orange")
 
 HistVarsList <- list(
   "Emissions|Kyoto Gases|non-CO2 synthetic"                 = c("Emi|Kyoto Gases|non-CO2 calc"),
@@ -2107,7 +2112,7 @@ carrier_color <- c(
   ggsave(paste0("./output/", time, "/png/Emi_nonCO2reported_line.png"), g[["Emi_nonCO2reported_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["Emi_nonCO2_line"]]
+  g[["Emi_nonCO2reported_line"]]
 ```
 
 # Carbon prices {.tabset}
