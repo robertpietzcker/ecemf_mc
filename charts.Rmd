@@ -6,6 +6,8 @@ output:
     toc: true
     toc_float:
       collapsed: false
+editor_options: 
+  chunk_output_type: console
 ---
 
 <style>
@@ -39,9 +41,13 @@ output:
   #packagesList <- c("quitte","ggplot2","geomtextpath","ggpattern","tidyr","grid","stringr","gridExtra","ggrepel","kableExtra","dplyr","remind2","rsvg","ggsvg")
   packages <- suppressWarnings(suppressMessages(lapply(packagesList, function(x){ if(!require(x, character.only = T, quietly = T)){ install.packages(x); return(paste0("installed missing package: ", x)) } else paste0("required package is installed: ", x) } )))
 
+  
+  #use_python("C:/Users/robertp/AppData/Local/Programs/Python/Python313")
 ```
 
-## download and prepare data
+
+
+<!-- ## download and prepare data -->
 
 ```{r download_data, echo=FALSE, include = FALSE}
 
@@ -149,26 +155,311 @@ output:
    saveRDS(histOrigN,"./hist/historical_origName.rds")
  }
 
-```
+```  
 
-<!-- additional data -->
 
-```{r additional_hist_data, echo=FALSE, include = FALSE}
 
-# Emissions|Kyoto Gases reduction vs 1990
-histOrigN <- rbind(
-  histOrigN,
-  histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG") %>%
-    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
-           value = value / histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value)),
-  histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG") %>%
-    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
-           value = value / histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value))
+```{r create_charts, echo=FALSE, include=FALSE}
+
+  # creating charts
+  g <- NULL
+
+  # output folder
+  dir.create(paste0("./output/", time, "/svg"), recursive = TRUE, showWarnings = FALSE)
+  dir.create(paste0("./output/", time, "/png"), recursive = TRUE, showWarnings = FALSE)
+
+``` 
+
+```{r aesthetics, echo=FALSE, include=FALSE}
+
+color <- c(
+  #model
+  "historic" = "black",
+  "IMAGE" = "#00ffff",
+  "Euro-Calliope" = "#c0c0c0",
+  "MEESA" = "#ff00ff",
+  "x MEESA" = "#ff00ff",
+  "MESSAGE" = "#800080",
+  "OSeMBE" = "#a52a2a",
+  "x OSeMBE" = "#a52a2a",
+  "PRIMES" = "#0000ff",
+  "PROMETHEUS" = "#ffd900",
+  "REMIND" = "#ff6347",
+  "LIMES" = "#ffaf47",
+  "TIAM-ECN" = "#4682b4",
+  "WITCH" = "#228b22"
 )
 
+modelLinetype <- c(
+  "historic" = "solid",
+  "IMAGE" =       "solid" ,
+  "Euro-Calliope" = "dashed",
+  "MEESA" =      "solid",
+  "x MEESA" =    "solid",
+  "MESSAGE" =    "dashed",
+  "OSeMBE" =     "solid",
+  "x OSeMBE" =   "solid",
+  "PRIMES" =     "solid",
+  "PROMETHEUS" = "solid",
+  "REMIND" =     "solid",
+  "LIMES" =      "solid",
+  "TIAM-ECN" =   "solid",
+  "WITCH" =      "solid"
+)
+
+``` 
+
+```{r limit_df, echo=FALSE, include = FALSE}
+df_safecopy <- df
+df <- df_safecopy
+df <- df_safecopy %>%
+    filter(period %in% seq(2005,2060,5),
+#           scenario %in% c("WP1 NetZero","WP1 NPI"),
+           scenario %in% c("WP1 NetZero","WP1 NPI","WP1 NetZero-LimBio","WP1 NetZero-LimNuc","WP1 NetZero-LimCCS"),
+           region == "EU27 & UK (*)" )
+
+histOrigN_safecopy <- histOrigN
+histOrigN <- histOrigN_safecopy %>%
+    filter(period %in% seq(1990,2030,1),
+           region == "EUR" )
+
 ```
 
-```{r additional_data, echo=FALSE, include = FALSE}
+<!-- ## helper lists and numbers -->
+
+```{r Helper_Lists_and_numbers, echo=FALSE, include = FALSE}
+mappingForAveraging <- quitte::remind_timesteps %>%
+  filter(period %in% c(2005, 2010, 2015, 2020)) %>%
+  # weight can be dropped in this case, because it is always 1
+  select(-"weight")
+
+convertEJ2TWh <- 277.7777778
+
+listForQuartiles <- list(
+  Min = min,
+  Mean = mean,
+  Median = median,
+  Max = max,
+  Sd = sd,
+  Q1=~quantile(., probs = 0.25),
+  Q3=~quantile(., probs = 0.75)
+)
+
+modelsFullSystem   <-  c("IMAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")
+modelsWindSolar     <-  c("Euro-Calliope","IMAGE","LIMES", "MEESA","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")
+modelsPowerEmi2040  <-  c("IMAGE","LIMES", "MEESA","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")
+
+```
+
+<!-- # complete missing data for models:  -->
+```{r add data for models, echo=FALSE, include = FALSE}
+
+# Euro-Calliope: 
+df_woModel   <- filter(df, model != "Euro-Calliope")
+df_onlyModel <- filter(df, model == "Euro-Calliope")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Liquids|Electricity`" = "`Secondary Energy|Liquids|Hydrogen`", units = "EJ/yr") # Euro-Calliope reports syngas under "hydrogen", this script uses "electricity" 
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Gases|Electricity`" = "`Secondary Energy|Gases|Hydrogen`", units = "EJ/yr") # Euro-Calliope reports syngas under "hydrogen", this script uses "electricity" 
+df <- rbind(df_woModel, df_onlyModel)
+
+#IMAGE
+df_woModel   <- filter(df, model != "IMAGE")
+df_onlyModel <- filter(df, model == "IMAGE")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Emissions|CO2|Energy|Demand|Bunkers`" = "`Emissions|CO2|Energy|Demand|Transportation (w/ bunkers)` - `Emissions|CO2|Energy|Demand|Transportation`", units = "MtCO2/yr") # IMAGE currently doesn't report bunker emissions explicitly 
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Carbon Capture|CO2|Energy|Demand|Bunkers`" = "`Emissions|CO2|Energy|Demand|Transportation (w/ bunkers)` - `Emissions|CO2|Energy|Demand|Transportation`", units = "MtCO2/yr") # IMAGE currently doesn't report bunker emissions explicitly 
+df <- rbind(df_woModel, df_onlyModel)
+
+# # MESSAGE: 
+df_woModel   <- filter(df, model != "MESSAGE")
+df_onlyModel <- filter(df, model == "MESSAGE")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Gases|Electricity`" = "`Secondary Energy|Gases|Hydrogen`", units = "EJ/yr") # MESSAGE reports syngas under "hydrogen", this script uses "electricity"
+# # MESSAGE reports all types on SE level, but none on FE level
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Final Energy|Gases|Fossil`" = "`Final Energy|Gases` * `Secondary Energy|Gases|Fossil` / `Secondary Energy|Gases`", units = "EJ/yr")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Final Energy|Gases|Biomass`" = "`Final Energy|Gases` * `Secondary Energy|Gases|Biomass` / `Secondary Energy|Gases`", units = "EJ/yr")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Final Energy|Gases|Electricity`" = "`Final Energy|Gases` * `Secondary Energy|Gases|Electricity` / `Secondary Energy|Gases`", units = "EJ/yr")
+df <- rbind(df_woModel, df_onlyModel)
+
+
+#OSEMBE
+df_woModel   <- filter(df, model != "OSeMBE")
+df_onlyModel <- filter(df, model == "OSeMBE")
+
+# fill missing OSEMBE Solar data
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Electricity|Solar`" = "`Secondary Energy|Electricity|Solar|PV`", units = "EJ/yr", completeMissing = TRUE)
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Capacity|Electricity|Solar`" = "`Capacity|Electricity|Solar|PV`", units = "GW", completeMissing = TRUE)
+df <- rbind(df_woModel, df_onlyModel)
+
+
+#PROMETHEUS
+df_woModel   <- filter(df, model != "PROMETHEUS")
+df_onlyModel <- filter(df, model == "PROMETHEUS")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Energy System Cost|Supply`" = "`Energy System Cost` ", units = "billion EUR_2020/yr") # PROMETHEUS hasn't updated reporting yet to report supply side costs under |supply 
+df <- rbind(df_woModel, df_onlyModel)
+
+# REMIND: 
+df_woModel   <- filter(df, model != "REMIND")
+df_onlyModel <- filter(df, model == "REMIND")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Gases|Electricity`" = "`Secondary Energy|Gases|Hydrogen`", units = "EJ/yr") # REMIND reports SE syngas under "hydrogen", this script uses "electricity" 
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Liquids|Electricity`" = "`Secondary Energy|Liquids|Hydrogen`", units = "EJ/yr") # REMIND reports SE synliq under "hydrogen", this script uses "electricity" 
+df_onlyModel  <- calc_addVariable(df_onlyModel, "`Price|Carbon`" = "`Price|Carbon (weighted by Final Energy)`", units = "EUR_2020/t CO2") # overwrite Price|Carbon with the better version
+df <- rbind(df_woModel, df_onlyModel)
+
+# TIAM-ECN: 
+df_woModel   <- filter(df, model != "TIAM-ECN")
+df_onlyModel <- filter(df, model == "TIAM-ECN")
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Gases|Electricity`" = "`Secondary Energy|Gases|Hydrogen`", units = "EJ/yr") # TIAM-ECN reports syngas under "hydrogen", this script uses "electricity" 
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Secondary Energy|Liquids|Electricity`" = "`Secondary Energy|Liquids|Hydrogen`", units = "EJ/yr") # TIAM-ECN reports SE synliq under "hydrogen", this script uses "electricity" 
+df <- rbind(df_woModel, df_onlyModel)
+
+# WITCH: 
+df_woWITCH   <- filter(df, model != "WITCH")
+df_onlyWITCH <- filter(df, model == "WITCH")
+df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Final Energy|Gases|Fossil`" = "`Final Energy|Gases`", units = "EJ/yr") # WITCH only has fossil gas on SE level, no reporting of biogas 
+# unclear if synliqs should be shifted from h2 to elec, or if they are wrongly reported
+df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Final Energy|Solids|Fossil`" = "`Final Energy|Solids` - `Final Energy|Solids|Biomass`", units = "EJ/yr") # WITCH only reports the biomass solids explicitly 
+df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Emissions|CO2|Other Removal`" = "-`Carbon Removal|Geological Storage`", units = "EJ/yr") # WITCH has DACCS 
+df_onlyWITCH <- calc_addVariable(df_onlyWITCH, "`Carbon Removal|Geological Storage|BioWITCH`" = "-`Carbon Capture|Storage|Biomass`", units = "EJ/yr") # WITCH has BECCS not reported under geological removals 
+<<<<<<< HEAD
+=======
+
+
+>>>>>>> 0d227ebb2d75d310e2e00754da8ff0eab9c51a87
+df <- rbind(df_woWITCH, df_onlyWITCH)
+
+df_woModel   <- filter(df, !model %in% modelsFullSystem )
+df_onlyModel <- filter(df, model %in% modelsFullSystem )
+
+# test negative emissions
+test <- filter(calc_addVariable(df_onlyModel, "`Emi|CO2|diffToEnInd`"  = "`Emissions|CO2` - `Emissions|CO2|Energy and Industrial Processes` - `Emissions|CO2|AFOLU` - `Emissions|CO2|Other` - `Emissions|CO2|Other Removal` - `Emissions|CO2|Waste`", units = "MtCO2/yr", only.new = TRUE, completeMissing = TRUE),abs(value) > 0.1)
+
+
+```
+
+<!-- # complete missing data for historical:  -->
+```{r add data for historical, echo=FALSE, include = FALSE}
+# UNFCCC
+histOrigN_woModel   <- filter(histOrigN, model != "UNFCCC")
+histOrigN_onlyModel <- filter(histOrigN, model == "UNFCCC")
+
+histOrigN_onlyModel <- calc_addVariable(histOrigN_onlyModel, "`Emi|CO2|Calc Other`" = "`Emi|CO2|Energy and Industrial Processes` - `Emi|CO2|Energy|Supply` - `Emi|CO2|Energy|Demand` - `Emi|CO2|Industrial Processes`", units = "Mt CO2/yr") # UNFCCC mapping currently misses some emissions to match the totals 
+histOrigN_onlyModel <- calc_addVariable(histOrigN_onlyModel, "`Emi|GHG|w/ intraEU Bunkers`" = "`Emi|GHG` + 0.33 * `Emi|GHG|Energy|Demand|Transport|International Bunkers` ", units = "Mt CO2/yr") # calculate ex-EU bunkers as 33% of total bunkers 
+histOrigN_onlyModel <- calc_addVariable(histOrigN_onlyModel,"`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr")
+
+histOrigN <- rbind(histOrigN_woModel, histOrigN_onlyModel)
+```
+
+
+
+<!-- # calculate additional variables for all models -->
+```{r calculate_nonCO2, echo=FALSE, include = FALSE}
+#df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases|non-CO2`", units = "MtCO2e/yr")
+df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases` - `Emissions|CO2`", units = "MtCO2e/yr")
+df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissions|Kyoto Gases|non-CO2` - `Emi|Kyoto Gases|non-CO2 calc`", units = "MtCO2e/yr")
+
+#energySystemCosts2025to2050Rel <- calcMitigationCost(df,"WP1 NPI","WP1 NetZero",yearFrom=2025,yearTo=2050,nameVar="Energy System Cost|Supply",discount=0.00)
+
+#df <- rbind(df,mutate(calcCumulatedDiscount(filter(df,period >= 2025, period <=2050),"Energy System Cost|Supply",nameDisrate=nameDisrate, discount=0.00), unit = "billion EUR_2020/yr"))
+#df <- rbind(df,calc_difference(filter(df,variable == "Energy System Cost|Supply"),dim = "scenario", entry = "WP1 NPI"))
+#df <- rbind(df,mutate(calcCumulatedDiscount(filter(df,period >= 2025, period <=2050),"Energy System Cost|Supply|difference",nameDisrate=nameDisrate, discount=0.00), unit = "billion EUR_2020/yr"))
+#energySystemCosts2025to2050Abs <- filter(df, variable == "Energy System Cost|Supply|difference|aggregated", period == 2050, scenario == "WP1 NetZero")
+
+```
+
+```{r calculate_Elecshares, echo=FALSE, include = FALSE}
+
+  df <- calc_addVariable(df, "`Final Energy|Electricity Share`" = "`Final Energy|Electricity` / `Final Energy`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Electricity Share woBunkers woNonEnergy`" = "(`Final Energy|Electricity` - `Final Energy|Bunkers|Electricity`) / (`Final Energy` - `Final Energy|Bunkers` - `Final Energy|Non-Energy Use`)", units = "%", completeMissing = TRUE)
+  
+histOrigN <- calc_addVariable(histOrigN, "`Final Energy|Electricity Share woBunkers woNonEnergy`" = "(`FE|Electricity`) / (`FE` - `FE|Transport|Bunkers` - `FE|Non-energy Use`)", units = "%", completeMissing = TRUE)
+histOrigN <- calc_addVariable(histOrigN, "`Final Energy|Electricity Share`" = "`FE|Electricity` / `FE`", units = "%", completeMissing = TRUE)
+  
+  df <- calc_addVariable(df, "`Final Energy|Industry|Electricity Share`" = "`Final Energy|Industry|Electricity` / `Final Energy|Industry`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Electricity Share`" = "`Final Energy|Residential and Commercial|Electricity` / `Final Energy|Residential and Commercial`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Transportation|Electricity Share`" = "`Final Energy|Transportation|Electricity` / `Final Energy|Transportation`", units = "%")
+  
+    df <- calc_addVariable(df, "`Final Energy|Nonelectric`" = "`Final Energy` - `Final Energy|Electricity`", units = "%")
+#    df <- calc_addVariable(df, "`UE|Nonelectric`" = "`Final Energy|Nonelectric`", units = "%")     
+#    df <- calc_addVariable(df, "`UE|Nonelectric`" = "`Final Energy|Nonelectric`", units = "%") 
+
+```
+
+```{r calculate_H2hares, echo=FALSE, include = FALSE}
+  df <- calc_addVariable(df, "`Final Energy|Hydrogen Share`" = "`Final Energy|Hydrogen` / `Final Energy`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Hydrogen Share woBunkers woNonEnergy`" = "(`Final Energy|Hydrogen` - `Final Energy|Bunkers|Hydrogen` - `Final Energy|Non-Energy Use|Hydrogen`) / (`Final Energy` - `Final Energy|Bunkers` - `Final Energy|Non-Energy Use`)", units = "%", completeMissing = TRUE)
+  
+  df <- calc_addVariable(df, "`Final Energy|Industry|Hydrogen Share`" = "`Final Energy|Industry|Hydrogen` / `Final Energy|Industry`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Hydrogen Share`" = "`Final Energy|Residential and Commercial|Hydrogen` / `Final Energy|Residential and Commercial`", units = "%")
+  df <- calc_addVariable(df, "`Final Energy|Transportation|Hydrogen Share`" = "`Final Energy|Transportation|Hydrogen` / `Final Energy|Transportation`", units = "%")
+```
+
+```{r calculate_SEshares, echo=FALSE, include = FALSE}
+
+  if("Trade|Secondary Energy|Liquids|Electricity|Volume" %in% unique(df$variable))
+    df <- calc_addVariable(df, "`SE-Import|Liquids|Synfuel`" = " -`Trade|Secondary Energy|Liquids|Electricity|Volume`", units = "EJ/yr")
+  df <- calc_addVariable(df, "`SE-Import|Liquids|Fossil`" = " -`Trade|Secondary Energy|Liquids|Oil|Volume` - `Trade|Secondary Energy|Liquids|Gas|Volume`", units = "EJ/yr", completeMissing = TRUE)
+  #MESSAGE  df <- calc_addVariable(df, "`SE-Import|Liquids|Fossil`" = " -`Trade|Secondary Energy|Liquids|Oil|Volume` - `Trade|Secondary Energy|Liquids|Coal|Volume` - `Trade|Secondary Energy|Liquids|Gas|Volume`", units = "EJ/yr", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE-Import|Liquids|Bio`" = " -`Trade|Secondary Energy|Liquids|Biomass|Volume` ", units = "EJ/yr")
+  
+  df <- calc_addVariable(df, "`SE|Liquids|Bio Share`" = "`Secondary Energy|Liquids|Biomass` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Liquids|Synfuel Share`" = "`Secondary Energy|Liquids|Electricity` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Liquids|Fossil Share`" = "`Secondary Energy|Liquids|Fossil` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
+  
+  df <- calc_addVariable(df, "`SE|Liquids|SumOfShares`" = "`SE|Liquids|Fossil Share` + `SE|Liquids|Bio Share` + `SE|Liquids|Synfuel Share`", units = "%", completeMissing = TRUE)
+    
+  df <- calc_addVariable(df, "`SE|Gases|Bio Share`" = "`Secondary Energy|Gases|Biomass` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Gases|Synfuel Share`" = "`Secondary Energy|Gases|Electricity` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Gases|Fossil Share`" = "`Secondary Energy|Gases|Fossil` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Gases|SumOfShares`" = "`SE|Gases|Fossil Share` + `SE|Gases|Bio Share` + `SE|Gases|Synfuel Share`", units = "%", completeMissing = TRUE)
+   
+  df <- calc_addVariable(df, "`SE|Solids|Bio Share`" = "`Secondary Energy|Solids|Biomass` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Solids|Coal Share`" = "`Secondary Energy|Solids|Coal` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Solids|Fossil Share`" = "`Secondary Energy|Solids|Fossil` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
+  df <- calc_addVariable(df, "`SE|Solids|SumOfShares`" = "`SE|Solids|Fossil Share` + `SE|Solids|Bio Share`", units = "%", completeMissing = TRUE)
+```
+
+```{r calculate_SEshares_2, echo=FALSE, include = FALSE}
+df <- calc_addVariable(df, "`SE|SolLiqGas`" = "`Secondary Energy|Liquids` + `Secondary Energy|Solids` + `Secondary Energy|Gases`", units = "EJ/yr")
+df <- calc_addVariable(df, "`SE|SolLiqGas|Bio`" = "`Secondary Energy|Liquids|Biomass` + `Secondary Energy|Solids|Biomass` + `Secondary Energy|Gases|Biomass`", units = "EJ/yr", completeMissing = TRUE)
+df <- calc_addVariable(df, "`SE|SolLiqGas|Fossil`" = "`Secondary Energy|Liquids|Fossil` + `Secondary Energy|Solids|Fossil` + `Secondary Energy|Gases|Fossil`", units = "EJ/yr", completeMissing = TRUE)
+df <- calc_addVariable(df, "`SE|SolLiqGas|Synfuel`" = "`Secondary Energy|Liquids|Electricity` +  `Secondary Energy|Gases|Electricity`", units = "EJ/yr", completeMissing = TRUE)
+
+
+df <- calc_addVariable(df, "`SE|SolLiqGas|Synfuel Share`" = "`SE|SolLiqGas|Synfuel` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`SE|SolLiqGas|Fossil Share`" = "`SE|SolLiqGas|Fossil` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`SE|SolLiqGas|Bio Share`" = "`SE|SolLiqGas|Bio` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`SE|SolLiqGas|SumOfShares`" = "`SE|SolLiqGas|Fossil Share` + `SE|SolLiqGas|Bio Share` + `SE|SolLiqGas|Synfuel Share`", units = "%", completeMissing = TRUE)
+```
+
+```{r calculate_FEshares_2, echo=FALSE, include = FALSE}
+df <- calc_addVariable(df, "`FE|SolLiqGas`" = "`Final Energy|Liquids` + `Final Energy|Solids` + `Final Energy|Gases`", units = "EJ/yr")
+df <- calc_addVariable(df, "`FE|SolLiqGas|Bio`" = "`Final Energy|Liquids|Biomass` + `Final Energy|Solids|Biomass` + `Final Energy|Gases|Biomass`", units = "EJ/yr", completeMissing = TRUE)
+df <- calc_addVariable(df, "`FE|SolLiqGas|Fossil`" = "`Final Energy|Liquids|Fossil` + `Final Energy|Solids|Fossil` + `Final Energy|Gases|Fossil`", units = "EJ/yr", completeMissing = TRUE)
+df <- calc_addVariable(df, "`FE|SolLiqGas|Synfuel`" = "`Final Energy|Liquids|Electricity` +  `Final Energy|Gases|Electricity`", units = "EJ/yr", completeMissing = TRUE)
+
+# add reductions of FE|SolLiqGas vs 2020
+tmp <- df %>%
+    filter(variable == "FE|SolLiqGas",
+           region == "EU27 & UK (*)") %>%
+  #         !(model %in% models_without_data)) %>%
+    mutate(denominator= 39,
+           #df %>% filter(region == "EU27 & UK (*)", scenario == "WP1 NetZero", model == "REMIND", variable == "FE|SolLiqGas", period == "2020") %>% pull(value),
+           # XXX BRING BACK HISTORIC VALUES!
+# mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(value = 1-(numerator/denominator),
+           variable = "FE|SolLiqGas reduction vs 2020",
+           unit = "%") %>%
+    na.omit() %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+df <- rbind(df, tmp) 
+
+df <- calc_addVariable(df, "`FE|SolLiqGas|Synfuel Share`" = "`FE|SolLiqGas|Synfuel` / `FE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`FE|SolLiqGas|Fossil Share`" = "`FE|SolLiqGas|Fossil` / `FE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`FE|SolLiqGas|Bio Share`" = "`FE|SolLiqGas|Bio` / `FE|SolLiqGas`", units = "%", completeMissing = TRUE)
+df <- calc_addVariable(df, "`FE|SolLiqGas|SumOfShares`" = "`FE|SolLiqGas|Fossil Share` + `FE|SolLiqGas|Bio Share` + `FE|SolLiqGas|Synfuel Share`", units = "%", completeMissing = TRUE)
+```
+
+```{r GHG_emission_reductins, echo=FALSE, include = FALSE}
 
 # Emissions|Kyoto Gases reduction vs 1990
 models_without_data <- df %>% #PRIMES is not reporting Emissions|Kyoto Gases
@@ -198,66 +489,290 @@ df <- rbind(df, tmp)
 
 ```
 
+```{r add_synthetic_LULUCF, echo=FALSE}
 
-```{r create_charts, echo=FALSE, include=FALSE}
+periodSynthetic <- c(2005,2010,2015,2020,2025,2030,2035,2040,2045,2050)
 
-  # creating charts
-  g <- NULL
+### LULUCF
 
-  # output folder
-  dir.create(paste0("./output/", time, "/svg"), recursive = TRUE, showWarnings = FALSE)
-  dir.create(paste0("./output/", time, "/png"), recursive = TRUE, showWarnings = FALSE)
+# It is necessary to check also if hist data covers all years 
 
-``` 
+hist_lulucf_all <- histOrigN %>% 
+  filter(variable == "Emi|CO2|Land-Use Change",
+         region == "EUR",
+         model == "UNFCCC")
+
+ hist_lulucf_2005 <- hist_lulucf_all %>%
+   filter(period >= 2005-2, period <= 2005+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_lulucf_2010 <- hist_lulucf_all %>%
+   filter(period >= 2010-2, period <= 2010+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_lulucf_2015 <- hist_lulucf_all %>%
+   filter(period >= 2015-2, period <= 2015+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_lulucf_2020 <- hist_lulucf_all %>%
+   filter(period >= 2020-2, period <= 2020+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
 
 
-```{r aesthetics, echo=FALSE, include=FALSE}
+# hist_lulucf <- histOrigN %>% 
+#   filter(variable == "Emi|CO2|Land-Use Change",
+#          period >= 2018, period <= 2022,
+#          region == "EUR",
+#          model == "UNFCCC") %>%
+#   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+#   pull(Mean)
+# 
+# hist_lulucf2015 <- histOrigN %>% 
+#   filter(variable == "Emi|CO2|Land-Use Change",
+#          period >= 2013, period <= 2017,
+#          region == "EUR",
+#          model == "UNFCCC") %>%
+#   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+#   pull(Mean)
 
-color <- c(
-  #model
-  "IMAGE" = "#00ffff",
-  "Euro-Calliope" = "#c0c0c0",
-  "MEESA" = "#ff00ff",
-  "x MEESA" = "#ff00ff",
-  "MESSAGE" = "#800080",
-  "OSeMBE" = "#a52a2a",
-  "x OSeMBE" = "#a52a2a",
-  "PRIMES" = "#0000ff",
-  "PROMETHEUS" = "#ffd900",
-  "REMIND" = "#ff6347",
-  "LIMES" = "#ffaf47",
-  "TIAM-ECN" = "#4682b4",
-  "WITCH" = "#228b22"
+# Type 1: Model has AFOLU CO2 data reported (equivalent to LULUCF). 
+df_type1_orig <- df %>% # reported afolu data models
+  filter(variable == "Emissions|CO2|AFOLU",
+         period %in% periodSynthetic, #         period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)") %>%
+  group_by(model) %>%
+  filter(sum(value*value) != 0) %>%
+  ungroup()
+
+model_w_lulucf <- df_type1_orig %>%
+  pull(model) %>%
+  unique()
+
+df_lulucf_adj <- left_join( # calculating adjustment factors based on 2020 historical values
+  df_type1_orig,
+  df_type1_orig %>%
+    filter(period == 2020) %>%
+    mutate(hist2020 = hist_lulucf_2020,
+           multFactor = hist_lulucf_2020 / value,
+           diffFactor = hist_lulucf_2020 - value) %>%
+    select(-period, -value),
+  by = join_by(model == model, scenario == scenario, region == region, variable == variable, unit == unit)
+  ) %>%
+  mutate(
+    valueAdjMult = value * multFactor,
+    valueAdjDiff = value + diffFactor
+  )
+
+df_lulucf_w_data <- df_lulucf_adj %>% # calculating the adjusted data using the difference between historical values to translate the model values instead of using a multiplicative factor
+  mutate(value = valueAdjDiff) %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+# Type 2: Model has no CO2 AFOLU data reported
+model_wo_lulucf <- df %>% filter(!(model %in% model_w_lulucf)) %>% pull(model) %>% unique() 
+
+df_lulucf_wo_data <- full_join( #assigning synthetic value to Emissions|CO2|AFOLU
+  df_lulucf_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
+  data.frame(model=rep(model_wo_lulucf,each=length(periodSynthetic)), period=rep(periodSynthetic,length(model_wo_lulucf)), value = rep(c(hist_lulucf_2005,hist_lulucf_2010,hist_lulucf_2015,hist_lulucf_2020, -280, -310,-310, -310,-310, -310),length(model_wo_lulucf))),
+  by = join_by(period == period)
+  )
+
+# Synthetic CO2 AFOLU data
+df_lulucf <- rbind(
+  df_lulucf_w_data,
+  df_lulucf_wo_data
+  ) %>%
+  mutate(variable = "Emissions|CO2|AFOLU synthetic")
+
+# adding synthetic data to main data
+df <- rbind(
+  df %>% filter(!(variable %in% c("Emissions|CO2|AFOLU synthetic"))),
+  df_lulucf
+  )
+
+```
+
+```{r add_synthetic_nonGHG, echo=FALSE}  
+hist_nonCO2_all <- histOrigN %>% 
+  filter(region == "EUR",
+         model == "UNFCCC",
+         variable == "Emi|Kyoto Gases|non-CO2 calc")
+
+ hist_nonCO2_2005 <- hist_nonCO2_all %>%
+   filter(period >= 2005-2, period <= 2005+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_nonCO2_2010 <- hist_nonCO2_all %>%
+   filter(period >= 2010-2, period <= 2010+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_nonCO2_2015 <- hist_nonCO2_all %>%
+   filter(period >= 2015-2, period <= 2015+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+ hist_nonCO2_2020 <- hist_nonCO2_all %>%
+   filter(period >= 2020-2, period <= 2020+2) %>%
+   summarize(Mean = mean(value, na.rm=TRUE)) %>%
+   pull(Mean)
+
+# Type A: Models that include non-CO2 emissions
+model_w_nonCO2 <- df %>% # reported afolu data models
+  filter(variable == "Emissions|Kyoto Gases",
+         period %in% c(2015,2020,2025,2030,2035,2040,2045,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)") %>%
+  group_by(model) %>%
+  filter(sum(value*value) != 0) %>%
+  ungroup() %>%
+  pull(model) %>%
+  unique()
+
+df_nonCO2_w_data <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases` - `Emissions|CO2`", units = "MtCO2e/yr", only.new = TRUE) %>%
+  filter(period %in% periodSynthetic,
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)",
+         model %in% model_w_nonCO2) 
+
+# Type B: Model has no GHG data reported
+model_wo_nonCO2 <- df %>% filter(!(model %in% model_w_nonCO2)) %>% pull(model) %>% unique() 
+
+df_nonCO2_wo_data <- full_join( #assigning synthetic value to Emissions|Kyoto Gases|non-CO2 synthetic
+  df_nonCO2_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
+  data.frame(model=rep(model_wo_nonCO2,each=length(periodSynthetic)), period=rep(periodSynthetic,length(model_wo_nonCO2)), value = rep(c(hist_nonCO2_2005,hist_nonCO2_2010,hist_nonCO2_2015,hist_nonCO2_2020, 630, 580, 550, 520, 515, 510),length(model_wo_nonCO2))),
+  by = join_by(period == period)
+  )
+
+# Synthetic non-CO2 data
+df_nonCO2 <- rbind(
+  df_nonCO2_w_data,
+  df_nonCO2_wo_data
+  ) %>%
+  mutate(variable = "Emissions|Kyoto Gases|non-CO2 synthetic")
+
+# adding synthetic data to main data
+df <- rbind(
+  df %>% filter(!(variable %in% c("Emissions|Kyoto Gases|non-CO2 synthetic"))),
+  df_nonCO2
+  )
+
+```
+
+```{r calculate_addSynthVar, echo=FALSE, include = FALSE}
+df_woModel   <- filter(df, !model %in% modelsFullSystem )
+df_onlyModel <- filter(df, model %in% modelsFullSystem )
+
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Emi|Kyoto Gases|synthetic`" = "`Emissions|CO2|Energy and Industrial Processes` + `Emissions|CO2|Other` + `Emissions|CO2|Other Removal` + `Emissions|CO2|Waste` +  `Emissions|CO2|AFOLU synthetic` + `Emissions|Kyoto Gases|non-CO2 synthetic` ", units = "MtCO2e/yr", completeMissing = TRUE)
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Gross Emi|Kyoto Gases|synthetic`" = "`Gross Emissions|CO2|Energy and Industrial Processes` + `Emissions|CO2|Other` + `Emissions|CO2|Waste` + `Emissions|Kyoto Gases|non-CO2 synthetic` ", units = "MtCO2e/yr", completeMissing = TRUE)
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Emi|CO2|synthetic`" = "`Emissions|CO2|Energy and Industrial Processes` + `Emissions|CO2|Other` + `Emissions|CO2|Other Removal` + `Emissions|CO2|Waste` +  `Emissions|CO2|AFOLU synthetic` ", units = "MtCO2/yr", completeMissing = TRUE)
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Carbon Removal|Synthetic AFOLU total`" = "-1 * `Emissions|CO2|AFOLU synthetic`", units = "MtCO2e/yr", completeMissing = TRUE)
+
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Emi|Kyoto Gases|synthetic wo Bunkers`" = "`Emi|Kyoto Gases|synthetic` - `Emissions|CO2|Energy|Demand|Bunkers`  ", units = "MtCO2e/yr", completeMissing = TRUE)
+df_onlyModel <- calc_addVariable(df_onlyModel, "`Emi|Kyoto Gases|synthetic w/ intraEU Bunkers`" = "`Emi|Kyoto Gases|synthetic` - 0.667 * `Emissions|CO2|Energy|Demand|Bunkers`  ", units = "MtCO2e/yr", completeMissing = TRUE)
+
+df <- rbind(df_woModel, df_onlyModel)
+
+# Emissions|Kyoto Gases reduction vs 1990
+
+tmp <- df_onlyModel %>%
+    filter(variable == "Emi|Kyoto Gases|synthetic",
+           region == "EU27 & UK (*)") %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG|w/ Bunkers", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(value = 1-(numerator/denominator),
+           variable = "Emi|Kyoto Gases|synthetic| reduction vs 1990",
+           unit = "%") %>%
+    na.omit() %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+tmp2 <- df_onlyModel %>%
+    filter(variable == "Emi|Kyoto Gases|synthetic wo Bunkers",
+           region == "EU27 & UK (*)") %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(value = 1-(numerator/denominator),
+           variable = "Emi|Kyoto Gases|synthetic wo Bunkers| reduction vs 1990",
+           unit = "%") %>%
+    na.omit() %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+tmp3 <- df_onlyModel %>%
+    filter(variable == "Emi|Kyoto Gases|synthetic w/ intraEU Bunkers",
+           region == "EU27 & UK (*)") %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG|w/ intraEU Bunkers", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(value = 100 * (1-(numerator/denominator)),
+           variable = "Emi|Kyoto Gases|synthetic w/ intraEU Bunkers| reduction vs 1990",
+           unit = "%") %>%
+    na.omit() %>%
+  select(model, scenario, region, variable, unit, period, value)
+
+df <- rbind(df_woModel, df_onlyModel,tmp,tmp2, tmp3) 
+
+```
+
+```{r add_variables_VRE, echo=FALSE, include=FALSE}
+
+  df <- calc_addVariable(df, "`Secondary Energy|Electricity|WindSolar`" = "`Secondary Energy|Electricity|Wind` + `Secondary Energy|Electricity|Solar`", units = "EJ/yr")
+  df <- calc_addVariable(df, "`Secondary Energy|Electricity|Sum`" = "`Secondary Energy|Electricity|Ocean` + `Secondary Energy|Electricity|Biomass` + `Secondary Energy|Electricity|Coal` + `Secondary Energy|Electricity|Gas` + `Secondary Energy|Electricity|Geothermal` + `Secondary Energy|Electricity|Hydro` + `Secondary Energy|Electricity|Hydrogen` + `Secondary Energy|Electricity|Nuclear` + `Secondary Energy|Electricity|Oil` + `Secondary Energy|Electricity|WindSolar` ", units = "EJ/yr")
+  df <- calc_addVariable(df, "`Secondary Energy|Electricity|DiffToSum`" = "`Secondary Energy|Electricity` - `Secondary Energy|Electricity|Sum`", units = "EJ/yr")
+  df <- calc_addVariable(df, "`Secondary Energy|Electricity|VRE Share`" = "`Secondary Energy|Electricity|WindSolar` / `Secondary Energy|Electricity`", units = "%")
+
+```
+
+```{r add_Trade_variables, echo=FALSE, include=FALSE}
+
+df <- calc_addVariable(df, "`Trade|Energy`" = " `Trade|Secondary Energy|Electricity|Volume` 
++ `Trade|Secondary Energy|Hydrogen|Volume` 
+  #                     + `Trade|Secondary Energy|Liquids|Coal|Volume`  #MESSAGE
+                       + `Trade|Secondary Energy|Liquids|Biomass|Volume`  
+                       + `Trade|Secondary Energy|Liquids|Electricity|Volume` 
+                       + `Trade|Secondary Energy|Solids|Biomass|Volume` + `Trade|Secondary Energy|Liquids|Biomass|Volume`
++ `Trade|Primary Energy|Biomass|Volume` 
++ `Trade|Primary Energy|Coal|Volume`
++ `Trade|Primary Energy|Gas|Volume`
++ `Trade|Secondary Energy|Liquids|Oil|Volume`
++ `Trade|Primary Energy|Oil|Volume` ", units = "EJ/yr", completeMissing = TRUE)
+```
+
+<!-- # remove early time steps:  -->
+```{r `remove_early_Time_steps, echo=FALSE}
+df <- df %>%
+  filter(  model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) )
+  )
+```
+<!-- # remove MESSAGE -->
+```{r removeMESSAGE, echo=FALSE, include=FALSE}
+df <- filter(df,model != "MESSAGE")
+```
+
+<!-- ## additional variables also for historic -->
+```{r additional_hist_data, echo=FALSE, include = FALSE}
+
+# Emissions|Kyoto Gases reduction vs 1990
+histOrigN <- rbind(
+  histOrigN,
+  histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG") %>%
+    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
+           value = 1 - (value / histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value) ) ),
+  histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG") %>%
+    mutate(variable = "Emissions|Kyoto Gases reduction vs 1990",
+           value = 1 - (value / histOrigN %>% filter(region == "EU27", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value) ) )
 )
 
-modelLinetype <- c(
-  "IMAGE" =       "solid" ,
-  "Euro-Calliope" = "dashed",
-  "MEESA" =      "solid",
-  "x MEESA" =    "solid",
-  "MESSAGE" =    "dashed",
-  "OSeMBE" =     "solid",
-  "x OSeMBE" =   "solid",
-  "PRIMES" =     "solid",
-  "PROMETHEUS" = "solid",
-  "REMIND" =     "solid",
-  "LIMES" =      "solid",
-  "TIAM-ECN" =   "solid",
-  "WITCH" =      "solid"
-)
+histOrigN <- calc_addVariable(histOrigN,"`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr")
 
-``` 
+
+  histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|WindSolar`" = "`SE|Electricity|Wind` + `SE|Electricity|Solar`", units = "EJ/yr")
+  histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|VRE Share`" = "`SE|Electricity|WindSolar` / `SE|Electricity`", units = "%")
+
+```
+
+
 
 
 # Emissions {.tabset}
-
-## calculate additional variables
-```{r calculate_nonCO2, echo=FALSE, include = FALSE}
-df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases|non-CO2`", units = "MtCO2e/yr")
-df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases` - `Emissions|CO2`", units = "MtCO2e/yr")
-df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissions|Kyoto Gases|non-CO2` - `Emi|Kyoto Gases|non-CO2 calc`", units = "MtCO2e/yr")
-```
-
 ## GHG Emissions
 
 ```{r ghg_emissions, echo=FALSE, include=FALSE}
@@ -266,7 +781,7 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
     filter(variable == "Emissions|Kyoto Gases",
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
-#           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
+           #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
            region == "EU27 & UK (*)")
 #           region %in% c("EU27 & UK (*)","EUR"))
 
@@ -275,23 +790,30 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
            region == "EU27 & UK (*)",
            model == "Eurostat")
   
-  histDataOrigN <- histOrigN %>%
+   plotDataHistOrigN <- histOrigN %>%
     filter(variable == "Emi|GHG|w/ Bunkers",
            region == "EUR",
            model == "UNFCCC")
   
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+#   geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+#   geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+  
   g[["GHG_Emissions"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
-      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +      
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
       geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=3,linetype="solid", color = "black") +
-      geom_line(data=histData, size=3,linetype="solid", color = "red") +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
       scale_linetype_manual(values = modelLinetype) +
-#      scale_linetype_manual(values = c("WP1 NetZero"="solid")) +
-#      scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="dashed", "WP1 NetZero-LimBio"="dotted", "WP1 NetZero-LimCCS"="dotdash", "WP1 NetZero-LimNuc"="longdash")) +
       ggtitle("GHG Emissions") +
       ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
       theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
@@ -301,6 +823,8 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   ggsave(paste0("./output/", time, "/png/GHG_Emissions.png"), g[["GHG_Emissions"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 
 ```
+
+
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["GHG_Emissions"]]
 ```
@@ -350,6 +874,8 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_2020.png"), g[["GHG_Emissions_Reductions_vs_2020"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 
 ```
+
+
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["GHG_Emissions_Reductions_vs_2020"]]
 ```
@@ -358,15 +884,36 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
 
 ```{r ghg_emissions_reductions_vs_2020_range, echo=FALSE, include=FALSE}
 
+#PRIMES is not reporting Emissions|Kyoto Gases
 
-
-  plotData <- df %>%
-    filter(variable == "Emissions|Kyoto Gases reduction vs 1990",
+models_without_data <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
            period >= 2010, period <= 2050,
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
+    group_by(model) %>%
+    filter(sum(value*value) == 0) %>%
+    pull(model) %>%
+    unique()
+
+if(length(models_without_data) > 0)
+  warning(paste0("Models that do not report `Emissions|Kyoto Gases` and that are excluded from this chart: ", models_without_data))
+
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases",
+           period >= 2010, period <= 2050,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)",
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           !(model %in% models_without_data)) %>%
+    mutate(denominator= histOrigN %>% filter(region == "EUR", model == "UNFCCC", variable == "Emi|GHG", period == "1990") %>% pull(value),
+           numerator=value) %>%
+    mutate(percentage = numerator/denominator,
+           reduction = 1-percentage) %>%
+    na.omit() %>%
     group_by(period) %>%
-    summarise_at(vars(value), list(
+    summarise_at(vars(reduction), list(
       Min = min,
       Mean = mean,
       Median = median,
@@ -398,32 +945,43 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   ggsave(paste0("./output/", time, "/png/GHG_Emissions_Reductions_vs_1990_range.png"), g[["GHG_Emissions_Reductions_vs_1990_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 
 ```
+
+
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["GHG_Emissions_Reductions_vs_1990_range"]]
 ```
 
-## CO2 Emissions
+## CO2 Emissions line plot
 
 ```{r CO2_Emi_EnergyIndustrProc, echo=FALSE, include=FALSE}
-
+# paper plot
   plotData <- df %>%
     filter(variable == "Emissions|CO2|Energy and Industrial Processes",
            period >=2005, period <= 2050,
+           model %in% modelsFullSystem,
            scenario %in% c("WP1 NetZero"),
 #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
            region == "EU27 & UK (*)")
 #           region %in% c("EU27 & UK (*)","EUR"))
 
-  histDataOrigN <- histOrigN %>%
+  plotDataHistOrigN <- histOrigN %>%
     filter(variable == "Emi|CO2|w/ Bunkers|Energy and Industrial Processes",
            region == "EUR",
            model == "UNFCCC")
   
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+
   g[["CO2_Emi_EnergyIndustrProc"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
       geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=3,linetype="solid", color = "black") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
@@ -437,37 +995,795 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   ggsave(paste0("./output/", time, "/png/CO2_Emi_EnergyIndustrProc.png"), g[["CO2_Emi_EnergyIndustrProc"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 
 ```
+
+
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["CO2_Emi_EnergyIndustrProc"]]
 ```
 
-## Power sector emissions
+## CO2 Emissions En and IndProc stacked bar plot
 
-```{r CO2_electricitySupply, echo=FALSE, include=FALSE}
+```{r CO2_Emi_EnergyIndustrProc_StackedBar, echo=FALSE, include=FALSE}
+
+modelsToShow <- c("hist-UNFCCC-av","hist-UNFCCC","LIMES","IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")
+
+vars <- c(
+  "Dem-OtherSector" = "Emissions|CO2|Energy|Demand|Other Sector",
+  "Dem-AFOFI"       = "Emissions|CO2|Energy|Demand|AFOFI",
+  "Dem-ResAndCom"   = "Emissions|CO2|Energy|Demand|Residential and Commercial",
+  "Dem-Ind"         = "Emissions|CO2|Energy|Demand|Industry",
+  "IndProcess"      = "Emissions|CO2|Industrial Processes",
+  "Dem-Bunkers"     = "Emissions|CO2|Energy|Demand|Bunkers",
+  "Dem-Transport"   = "Emissions|CO2|Energy|Demand|Transportation",
+  "Supply-Other"    = "Emissions|CO2|Energy|Supply|Other",
+  "Supply-H2"       = "Emissions|CO2|Energy|Supply|H2",
+  "Supply-Sol"      = "Emissions|CO2|Energy|Supply|Solids",
+  "Supply-Liq"      = "Emissions|CO2|Energy|Supply|Liquids",
+  "Supply-Gas"      = "Emissions|CO2|Energy|Supply|Gases",
+  "Supply-Heat"     = "Emissions|CO2|Energy|Supply|Heat",
+  "Supply-Elec"     = "Emissions|CO2|Energy|Supply|Electricity",
+  "Total EnInd"     = "Emissions|CO2|Energy and Industrial Processes"
+)
+
+pointVars <- c("Emissions|CO2|Energy and Industrial Processes")
+
+carrier_color <- c(  
+  "Dem-OtherSector" = "#5ed5f0",
+  "Dem-AFOFI" = "#6df25e",
+  "Dem-ResAndCom" = "#eba357",
+  "Dem-Ind" = "#ba6759",
+  "IndProcess" = "#735550",
+  "Dem-Bunkers" = "#283280",
+  "Dem-Transport"    = "#a7c8db",
+  "Supply-Other" = "#ff33ff",
+  "Supply-H2" = "#35effc",
+  "Supply-Sol" = "#0c0c0c",
+  "Supply-Liq" = "#813499",
+  "Supply-Gas" = "#337fff",
+  "Supply-Heat" = "#b30000",
+  "Supply-Elec" = "#fcec35")
+
+HistVarsList <- list(
+  "Emissions|CO2|Energy|Supply|Other"                                            = c("Emi|CO2|Calc Other"),
+  "Emissions|CO2|Energy|Demand|Residential and Commercial"  = c("Emi|CO2|Energy|Demand|Buildings"),
+  "Emissions|CO2|Energy|Demand|Industry"                    = c("Emi|CO2|Energy|Demand|Industry"),
+  "Emissions|CO2|Industrial Processes"                      = c("Emi|CO2|Industrial Processes"),
+  "Emissions|CO2|Energy|Demand|Bunkers"                     = c("Emi|CO2|Energy|Demand|Transport|International Bunkers"),
+  "Emissions|CO2|Energy|Demand|Transportation"              = c("Emi|CO2|Energy|Demand|Transport"),
+  "Emissions|CO2|Energy|Supply|Solids"                      = c("Emi|CO2|Energy|Supply|Solids w/ couple prod"),
+  "Emissions|CO2|Energy|Supply|Liquids"                     = c("Emi|CO2|Energy|Supply|Liquids w/ couple prod"),
+  "Emissions|CO2|Energy|Supply|Electricity"                 = c("Emi|CO2|Energy|Supply|Electricity and Heat")
+)
+HistVarTotal <- list(
+  "Emissions|CO2|Energy and Industrial Processes"  = c("Emi|CO2|w/ Bunkers|Energy and Industrial Processes"))
+
+varToNewVar    <- setNames(names(unlist(HistVarsList)),unlist(HistVarsList))
+varToNewVarTot <- setNames(names(unlist(HistVarTotal)),unlist(HistVarTotal))
+
+plotDataHistOrigN <- histOrigN %>%
+  filter(variable %in% names(varToNewVar),
+         region == "EUR",
+         model == "UNFCCC") %>%
+  mutate(variable = factor(varToNewVar[as.character(variable)]), 
+         scenario = factor("WP1 NetZero"),
+         model = factor("hist-UNFCCC") )
+
+plotDataHistAv <- mappingForAveraging %>%
+  left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-av") )
+
+plotData <- df %>%
+  filter(variable %in% vars,
+         !variable %in% pointVars,
+         period %in% c(2020,2025,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsToShow,
+         region == "EU27 & UK (*)") 
+
+plotDataAll <- rbind(filter(plotDataHistOrigN,period == 2020), filter(plotDataHistAv,period == 2020),plotData )  
+
+plotDataAllreorder <- plotDataAll %>%
+  mutate(model = factor(model, levels = modelsToShow),
+         variable = factor(variable, levels = vars)) #order
+
+plotDataTotals <- df %>%
+  filter(variable == "Emissions|CO2|Energy and Industrial Processes",
+         period %in% c(2020,2025,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsToShow,
+         region == "EU27 & UK (*)") %>%
+  mutate(model = factor(model, levels = modelsToShow)
+  ) #order
+
+plotDataHistOrigNTot <- histOrigN %>%
+  filter(variable %in% names(varToNewVarTot),
+         region == "EUR",
+         model == "UNFCCC") %>%
+  mutate(variable = factor(varToNewVarTot[as.character(variable)]), 
+         scenario = factor("WP1 NetZero"),
+         model = factor("hist-UNFCCC") )
+
+plotDataHistAvTot <- mappingForAveraging %>%
+  left_join(plotDataHistOrigNTot, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-av") )
+
+plotDataAllTot <- rbind(filter(plotDataHistOrigNTot,period == 2020), filter(plotDataHistAvTot,period == 2020),plotDataTotals )  
+
+plotDataAllTotreorder <- plotDataAllTot %>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+  g[["CO2_Emi_EnergyIndustrProc_StackedBar"]] <- ggplot(plotDataAllreorder,aes(x=model,y=value,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
+    geom_point(data = plotDataAllTotreorder, aes(x=model, y = value), 
+                colour = "black", size = 4, shape = 18) + 
+    ggtitle("Sectoral CO2 emi") +
+    ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/CO2_Emi_EnergyIndustrProc_StackedBar.svg"), g[["CO2_Emi_EnergyIndustrProc_StackedBar"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/CO2_Emi_EnergyIndustrProc_StackedBar.png"), g[["CO2_Emi_EnergyIndustrProc_StackedBar"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["CO2_Emi_EnergyIndustrProc_StackedBar"]]
+```
+
+## CO2 Gross Emissions En and IndProc and CDR stacked bar plot
+
+```{r Gross_CO2_Emi_EnergyIndustrProc_StackedBar, echo=FALSE, include=FALSE}
+
+histModelsToShow <- c("hist-UNFCCC-average","hist-UNFCCC")
+modelsToShow <- c(histModelsToShow, modelsFullSystem)
+
+vars <- c(
+  "nonCO2-synth"    = "Emissions|Kyoto Gases|non-CO2 synthetic",
+  "CO2other"       = "Emissions|CO2|Other",
+  "Dem-AFOFI"       = "Emissions|CO2|Energy|Demand|AFOFI",
+  "Dem-ResAndCom"   = "Emissions|CO2|Energy|Demand|Residential and Commercial",
+  "GrossDem-Ind"         = "Gross Emissions|CO2|Energy|Demand|Industry",
+  "GrossIndProcess"      = "Gross Emissions|CO2|Industrial Processes",
+  "Dem-Bunkers"     = "Emissions|CO2|Energy|Demand|Bunkers",
+  "Dem-Transport"   = "Emissions|CO2|Energy|Demand|Transportation",
+  "GrossSupply-Other"    = "Gross Emissions|CO2|Energy|Supply|Other",
+  "GrossSupply-H2"       = "Gross Emissions|CO2|Energy|Supply|H2",
+  "GrossSupply-Sol"      = "Gross Emissions|CO2|Energy|Supply|Solids",
+  "GrossSupply-Liq"      = "Gross Emissions|CO2|Energy|Supply|Liquids",
+  "GrossSupply-Gas"      = "Gross Emissions|CO2|Energy|Supply|Gases",
+  "GrossSupply-Heat"     = "Gross Emissions|CO2|Energy|Supply|Heat",
+  "GrossSupply-Elec"     = "Gross Emissions|CO2|Energy|Supply|Electricity",
+  "AFOLU synth"     = "Emissions|CO2|AFOLU synthetic",
+  "CarbRemov Geo"     = "Carbon Removal|Geological Storage",
+  "CarbRemov Geo2"     = "Carbon Removal|Geological Storage|BioWITCH",
+  "Total GrossEnInd"     = "Gross Emissions|CO2|Energy and Industrial Processes",
+  "Total CO2"       = "Emissions|CO2",
+  "Total EnInd"     = "Emissions|CO2|Energy and Industrial Processes",
+  "Total Kyoto Synth"     = "Emi|Kyoto Gases|synthetic"
+)
+
+pointVars <- c("Gross Emissions|CO2|Energy and Industrial Processes","Emissions|CO2|Energy and Industrial Processes","Emissions|CO2",  "Emi|Kyoto Gases|synthetic" )
+
+carrier_color <- c(  
+  "nonCO2-synth"    = "purple",
+  "CO2other"        = "black",
+  "Dem-OtherSector" = "#5ed5f0",
+  "Dem-AFOFI"       = "#6df25e",
+  "Dem-ResAndCom" = "#eba357",
+  "GrossDem-Ind" = "#ba6759",
+  "GrossIndProcess" = "#735550",
+  "Dem-Bunkers" = "#283280",
+  "Dem-Transport"    = "#a7c8db",
+  "GrossSupply-Other" = "#ff33ff",
+  "GrossSupply-H2" = "#35effc",
+  "GrossSupply-Sol" = "#0c0c0c",
+  "GrossSupply-Liq" = "#813499",
+  "GrossSupply-Gas" = "#337fff",
+  "GrossSupply-Heat" = "#b30000",
+  "GrossSupply-Elec" = "#fcec35",
+  "AFOLU synth"    = "darkgreen",
+  "CarbRemov Geo"    = "red", 
+  "CarbRemov Geo2"    = "orange")
+
+HistVarsList <- list(
+  "Emissions|Kyoto Gases|non-CO2 synthetic"                 = c("Emi|Kyoto Gases|non-CO2 calc"),
+  "Gross Emissions|CO2|Energy|Supply|Other"                 = c("Emi|CO2|Calc Other"),
+  "Emissions|CO2|Energy|Demand|Residential and Commercial"  = c("Emi|CO2|Energy|Demand|Buildings"),
+  "Gross Emissions|CO2|Energy|Demand|Industry"                    = c("Emi|CO2|Energy|Demand|Industry"),
+  "Gross Emissions|CO2|Industrial Processes"                      = c("Emi|CO2|Industrial Processes"),
+  "Emissions|CO2|Energy|Demand|Bunkers"                     = c("Emi|CO2|Energy|Demand|Transport|International Bunkers"),
+  "Emissions|CO2|Energy|Demand|Transportation"              = c("Emi|CO2|Energy|Demand|Transport"),
+  "Gross Emissions|CO2|Energy|Supply|Solids"                      = c("Emi|CO2|Energy|Supply|Solids w/ couple prod"),
+  "Gross Emissions|CO2|Energy|Supply|Liquids"                     = c("Emi|CO2|Energy|Supply|Liquids w/ couple prod"),
+  "Gross Emissions|CO2|Energy|Supply|Electricity"                 = c("Emi|CO2|Energy|Supply|Electricity and Heat"),
+  "Emissions|CO2|AFOLU synthetic"                                             = c("Emi|GHG|Land-Use Change")
+)
+HistVarTotal <- list(
+  "Gross Emissions|CO2|Energy and Industrial Processes"  = c("Emi|CO2|w/ Bunkers|Energy and Industrial Processes"))
+
+HistVarTotalKyoto <- list(
+  "Emi|Kyoto Gases|synthetic"  = c("Emi|GHG|w/ Bunkers"))
+
+varToNewVar    <- setNames(names(unlist(HistVarsList)),unlist(HistVarsList))
+varToNewVarTot <- setNames(names(unlist(HistVarTotal)),unlist(HistVarTotal))
+varToNewVarTotKyo <- setNames(names(unlist(HistVarTotalKyoto)),unlist(HistVarTotalKyoto))
+
+plotDataHistOrigN <- histOrigN %>%
+  filter(variable %in% names(varToNewVar),
+         region == "EUR",
+         model == "UNFCCC") %>%
+  mutate(variable = factor(varToNewVar[as.character(variable)]), 
+         scenario = factor("WP1 NetZero"),
+         model = factor("hist-UNFCCC") )
+# *********
+histOrigNunfccc <- histOrigN %>%
+  filter(model == "UNFCCC")
+
+histOrigNaverageUNFCCC <- mappingForAveraging %>%
+  left_join(histOrigNunfccc, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-average") )
+
+# **************
+
+
+plotDataHistAv <- mappingForAveraging %>%
+  left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-average") )
+
+plotDataPrep <- df %>%
+  filter(variable %in% vars,
+         period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsFullSystem,
+         region == "EU27 & UK (*)") 
+
+plotData <- plotDataPrep %>%
+  filter(!variable %in% pointVars)
+
+plotDataCorrSign <- rbind(filter(plotData, !variable == "Carbon Removal|Geological Storage"), 
+                          plotData %>% filter(variable == "Carbon Removal|Geological Storage") %>%
+                              mutate(value = -value))
+
+plotDataAll <- rbind(filter(plotDataHistOrigN,period == 2020), filter(plotDataHistAv,period == 2020),plotDataCorrSign )  
+
+plotDataAllreorder <- plotDataAll %>%
+  mutate(model = factor(model, levels = modelsToShow),
+         variable = factor(variable, levels = vars)) #order
+
+plotDataTotalGross <- plotDataPrep %>%
+  filter(variable == "Gross Emissions|CO2|Energy and Industrial Processes")
+
+  # *********************
+plotDataHistOrigNTot <- histOrigN %>%
+  filter(variable %in% names(varToNewVarTot),
+         region == "EUR",
+         model == "UNFCCC") %>%
+  mutate(variable = factor(varToNewVarTot[as.character(variable)]),
+         scenario = factor("WP1 NetZero"),
+         model = factor("hist-UNFCCC") )
+
+plotDataHistAvTot <- mappingForAveraging %>%
+  left_join(plotDataHistOrigNTot, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-average") )
+   #**********************************
+
+# plotDataHistAvTot <- histOrigNaverageUNFCCC %>%
+#   filter(variable %in% names(varToNewVarTot),
+#          region == "EUR",
+#          model == "hist-UNFCCC-av") %>%
+#   mutate(variable = factor(varToNewVarTot[as.character(variable)]), 
+#          scenario = factor("WP1 NetZero"),
+#          model = factor("hist-UNFCCC-av") )
+
+plotDataAllTotGross <- rbind(filter(plotDataHistOrigNTot,period == 2020), filter(plotDataHistAvTot,period == 2020),plotDataTotalGross )  %>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+plotDataAllTotCO2 <- plotDataPrep %>%
+  filter(variable == "Emissions|CO2") %>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+
+plotDataHistOrigNTotKyo <- histOrigN %>%
+  filter(variable %in% names(varToNewVarTotKyo),
+         region == "EUR",
+         model == "UNFCCC") %>%
+  mutate(variable = factor(varToNewVarTotKyo[as.character(variable)]),
+         scenario = factor("WP1 NetZero"),
+         model = factor("hist-UNFCCC") )
+
+plotDataHistAvTotKyo <- mappingForAveraging %>%
+  left_join(plotDataHistOrigNTotKyo, by = c("year" = "period")) %>%
+  group_by(model, scenario, region, period, variable, unit) %>%
+  dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+  ungroup() %>%
+  mutate(model = factor("hist-UNFCCC-average") )
+
+
+plotDataTotKyoto <- plotDataPrep %>%
+  filter(variable == "Emi|Kyoto Gases|synthetic") %>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+plotDataAllTotKyo <- rbind(filter(plotDataHistOrigNTotKyo,period == 2020), filter(plotDataHistAvTotKyo,period == 2020),plotDataTotKyoto )  %>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+  g[["CO2_GrossEmi_EnergyIndustrProc_StackedBar"]] <- ggplot(plotDataAllreorder,aes(x=model,y=value,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
+    geom_point(data = plotDataAllTotGross, aes(x=model, y = value), colour = "black", size = 4, shape = 18) + 
+    geom_point(data = plotDataAllTotCO2, aes(x=model, y = value), colour = "black", size = 4, shape = 3) +
+    geom_point(data = plotDataAllTotKyo, aes(x=model, y = value), colour = "black", size = 4, shape = 17) +
+    ggtitle("Sectoral Gross CO2 emi") +
+    ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/CO2_GrossEmi_EnergyIndustrProc_StackedBar.svg"), g[["CO2_GrossEmi_EnergyIndustrProc_StackedBar"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/CO2_GrossEmi_EnergyIndustrProc_StackedBar.png"), g[["CO2_GrossEmi_EnergyIndustrProc_StackedBar"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+```
+
+
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["CO2_GrossEmi_EnergyIndustrProc_StackedBar"]]
+```
+
+## Kyoto Check Gross Emissions and removals stacked bar plot
+
+```{r Emi_Kyo_checkGross_Removals_StackedBar, echo=FALSE, include=FALSE}
+# paper plot
+histModelsToShow <- c("hist-UNFCCC-av","hist-UNFCCC")
+modelsToShow <- c(histModelsToShow, modelsFullSystem)
+
+vars <- c(
+  "CarbRemov-geo"     = "Carbon Removal|Geological Storage",
+  "AFOLU synth"     = "Emissions|CO2|AFOLU synthetic",
+  "Total Kyoto"     = "Emi|Kyoto Gases|synthetic",
+  "Total Gross Kyoto"  = "Gross Emi|Kyoto Gases|synthetic"
+)
+
+pointVars <- c("Gross Emi|Kyoto Gases|synthetic" )
+
+carrier_color <- c(  
+  "CarbRemov-geo"    = "purple",
+  "AFOLU synth"    = "darkgreen")
+
+
+plotDataPrep <- df %>%
+  filter(variable %in% vars,
+         period %in% c(2020,2025,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsFullSystem,
+         region == "EU27 & UK (*)") 
+
+plotDataStackedBarsPrep <- plotDataPrep %>%
+  filter(!variable %in% pointVars)
+
+plotDataAllreorder <- rbind(filter(plotDataStackedBarsPrep, !variable == "Emissions|CO2|AFOLU synthetic"), plotDataStackedBarsPrep %>% filter(variable == "Emissions|CO2|AFOLU synthetic") %>%
+                              mutate(value = -value)) %>%
+  mutate(model = factor(model, levels = modelsToShow),
+         variable = factor(variable, levels = vars)) #order
+
+plotDataAllTotGross <- plotDataPrep %>%
+  filter(variable == "Gross Emi|Kyoto Gases|synthetic")%>%
+  mutate(model = factor(model, levels = modelsToShow)) #order
+
+  g[["Emi_Kyo_checkGross_Removals_StackedBar"]] <- ggplot(plotDataAllreorder,aes(x=model,y=value,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
+    geom_point(data = plotDataAllTotGross, aes(x=model, y = value), colour = "black", size = 4, shape = 18) + 
+    ggtitle("Sectoral Gross Kyotoy emi") +
+    ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/Emi_check_Kyoto_GrossEmi_CDR_StackedBar.png"), g[["Emi_Kyo_checkGross_Removals_StackedBar"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Emi_Kyo_checkGross_Removals_StackedBar"]]
+```
+
+## compare Synth and orig LULUCF line plot
+```{r LULUCF_synth_Orig_line, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
-    filter(variable == "Emissions|CO2|Energy|Supply|Electricity",
+    filter(variable %in% c("Emissions|CO2|AFOLU synthetic", "Emissions|CO2|AFOLU", "Carbon Removal|Land Use"),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
-#           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)")
-#           region %in% c("EU27 & UK (*)","EUR"))
-  
+
+  g[["LULUCF_synth_Orig_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=variable)) +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = c("Emissions|CO2|AFOLU synthetic" = "solid", "Emissions|CO2|AFOLU"="dashed", "Carbon Removal|Land Use"="dotted", "Carbon Capture|Direct Air Capture"="dotdash", "Carbon Capture|Industrial Process"="longdash")) +
+      ggtitle("Land Use synth and orig") +
+      ylab(expression(paste("Mt ", CO[2],"/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/LULUCF_synth_Orig_line.png"), g[["LULUCF_synth_Orig_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+    quantile(filter(plotData, period == 2030)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles    
+    quantile(filter(plotData, period == 2040)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles     
+    quantile(filter(plotData, period == 2050)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles 
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["LULUCF_synth_Orig_line"]]
+```
+
+## Synthetic LULUCF line plot
+```{r lulucf_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|CO2|AFOLU synthetic",
+           period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           scenario %in% c("WP1 NetZero"),
+           model %in% modelsFullSystem,           
+           region == "EU27 & UK (*)")
+
+
   histDataOrigN <- histOrigN %>%
-    filter(variable == "Emi|CO2|Energy|Supply|Electricity w/ couple prod",
+    filter(variable == "Emi|CO2|Land-Use Change",
            region == "EUR",
-           model == "Ember")
+           model == "UNFCCC")
   
-  g[["CO2_electricitySupply"]] <- ggplot(plotData,aes(x=period,y=value)) +
+  g[["lulucf_synth_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
       geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=3,linetype="solid", color = "black") +
+      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
       scale_linetype_manual(values = modelLinetype) +
-#      scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid", "WP1 NetZero-LimBio"="dotted", "WP1 NetZero-LimCCS"="dotdash", "WP1 NetZero-LimNuc"="longdash")) +
+#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
+      ggtitle("LULUCF (synthetic)") +
+      ylab("Mt CO2/yr") +
+      theme(axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/lulucf_synth_line.png"), g[["lulucf_synth_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["lulucf_line"]]
+```
+
+## Synthetic non-CO2 emissions line plot
+```{r nonCO2_line, echo=FALSE, include=FALSE}
+# paper plot (maybe, probably take out)
+  plotData <- df %>%
+    filter(variable == "Emissions|Kyoto Gases|non-CO2 synthetic",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% modelsFullSystem, 
+                      region == "EU27 & UK (*)")
+
+  plotDataHist <- histOrigN %>%
+    filter(region == "EUR",
+           period >= 2005,
+           model == "UNFCCC",
+           variable == "Emi|Kyoto Gases|non-CO2 calc") %>%
+    mutate(model = factor("historic"),
+           scenario = factor("WP1 NetZero"))
+    
+  plotDataAll <- rbind(plotDataHist,plotData)
+  
+  g[["nonCO2_line"]] <- ggplot(plotDataAll,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+#      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotDataAll$model)],levels(plotDataAll$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
+      ggtitle("non-CO2 emissions (synthetic)") +
+      ylab("Mt CO2/yr") +
+      theme(axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/nonCO2_line.png"), g[["nonCO2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["nonCO2_line"]]
+```
+
+
+## GHG Emissions lines plots - synthetic
+```{r ghg_emissions_line_plots, echo=FALSE, include=FALSE}
+# paper plot
+  plotData <- df %>%
+    filter(variable == "Emi|Kyoto Gases|synthetic",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% modelsFullSystem, 
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           region == "EU27 & UK (*)")
+
+# plotData <- plotData %>% 
+#  filter(model != "PRIMES" | period != 2005,
+#         model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ) )
+  
+
+   plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Emi|GHG|w/ Bunkers",
+           region == "EUR",
+           model == "UNFCCC")
+  
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+#   geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+#   geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+  
+  g[["GHG_Emissions_synth"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+#      scale_linetype_manual(values = c("WP1 NetZero"="solid")) +
+#      scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="dashed", "WP1 NetZero-LimBio"="dotted", "WP1 NetZero-LimCCS"="dotdash", "WP1 NetZero-LimNuc"="longdash")) +
+      ggtitle("GHG Emissions (synthetic)") +
+      ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/GHG_Emissions_synth.png"), g[["GHG_Emissions_synth"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["GHG_Emissions_synth"]]
+```
+
+## compare Synth and orig Kyoto GHG line plot
+```{r Kyotot_synth_Orig_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable %in% c("Emi|Kyoto Gases|synthetic", "Emissions|Kyoto Gases"),
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% modelsFullSystem,
+           region == "EU27 & UK (*)")
+
+plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Emi|GHG|w/ Bunkers",
+           region == "EUR",
+           model == "UNFCCC")
+  
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+
+  g[["KyotoGHG_synth_Orig_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(size=1,aes(color=model,linetype=variable)) +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = c("Emi|Kyoto Gases|synthetic" = "solid", "Emissions|Kyoto Gases"="dashed", "yy"="dotted", "xx"="dotdash", "zz"="longdash")) +
+      ggtitle("GHG gas emissions synth and orig") +
+      ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/KyotoGHG_synth_Orig_line.png"), g[["KyotoGHG_synth_Orig_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["KyotoGHG_synth_Orig_line"]]
+```
+
+
+
+
+## GHG emission (synthetic)  reductions vs 1990 w/ intra-EU bunkers - calc
+```{r ghg_emissions_reductions_vs_1990_wIntraEU, echo=FALSE, include=FALSE}
+# paper calc
+plotData <- df %>%
+  filter(variable == "Emi|Kyoto Gases|synthetic w/ intraEU Bunkers| reduction vs 1990",
+         period %in% c(2010,2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)", 
+         model %in% modelsFullSystem ) %>%
+  mutate (value = - value) %>%
+  group_by(period) %>%
+  summarise_at(vars(value), list(
+    Min = min,
+    Mean = mean,
+    Median = median,
+    Max = max,
+    Sd = sd,
+    Q1=~quantile(., probs = 0.25),
+    Q3=~quantile(., probs = 0.75)))
+    
+```
+
+
+## GHG emission (synthetic)  reductions vs 1990 - range
+
+```{r ghg_emissions_reductions_vs_1990, echo=FALSE, include=FALSE}
+
+plotData <- df %>%
+  filter(variable == "Emi|Kyoto Gases|synthetic| reduction vs 1990",
+         period %in% c(2010,2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         region == "EU27 & UK (*)", 
+         model %in% modelsFullSystem ) %>%
+  mutate (value = - value) %>%
+  group_by(period) %>%
+  summarise_at(vars(value), list(
+    Min = min,
+    Mean = mean,
+    Median = median,
+    Max = max,
+    Sd = sd,
+    Q1=~quantile(., probs = 0.25),
+    Q3=~quantile(., probs = 0.75)))
+
+plotDataHistOrigN <- histOrigN %>%
+  filter(variable == "Emissions|Kyoto Gases reduction vs 1990",
+         region == "EUR",
+         model == "UNFCCC")
+plotDataHistOrigNsum <- plotDataHistOrigN %>%
+  mutate(Median = - value)
+#   summarise_at(vars(value), list(
+#    Median = value))
+
+g[["GHG_Emissions_synth_Reductions_vs_1990_range1"]] <- 
+  ggplot(plotData,aes(x=period,y=Median)) +
+  geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+  geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+  geom_line(linewidth=1,color="black") +
+  geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+  #    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+  #    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+  theme_minimal(base_size = 24) +
+  #  scale_y_continuous(breaks = c(0,-0.2,-0.4,-0.6,-0.8,-1),labels = scales::percent_format(accuracy = 1)) +
+  scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+  scale_x_continuous(n.breaks = 8) + 
+  theme(axis.title.x=element_blank()) +
+  theme(legend.position="none",
+        panel.background = element_rect(fill="#FFFFFF", color = NA),
+        plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+  geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+  labs(title="GHG Emissions Reductions") +
+  ylab("Reductions vs 1990 (%)")
+
+
+ggsave(paste0("./output/", time, "/svg/GHG_Emissions_synth_Reductions_vs_1990_range_white.svg"), g[["GHG_Emissions_synth_Reductions_vs_1990_range1"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+ggsave(paste0("./output/", time, "/png/GHG_Emissions_synth_Reductions_vs_1990_range_white.png"), g[["GHG_Emissions_synth_Reductions_vs_1990_range1"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+g[["GHG_Emissions_synth_Reductions_vs_1990_range1"]]
+```
+
+
+
+## land use and geological storage 
+
+```{r land_use_and_geological_storage, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable %in% c("Carbon Removal|Synthetic AFOLU total","Carbon Removal|Geological Storage"),
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           model %in% modelsFullSystem ,
+           region == "EU27 & UK (*)")
+
+  histPlotDataOrigN <- histOrigN %>%
+    filter(variable == "Emi|CO2|Land-Use Change",
+           region == "EUR",
+           model == "UNFCCC") %>%
+    mutate(value = -1 * value)
+
+  g[["CDR_LU_GS_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(size=1,aes(color=model,linetype=variable)) +
+      geom_line(data=histPlotDataOrigN, size=3,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = c("Carbon Removal|Synthetic AFOLU total"="solid", "Carbon Removal|Geological Storage"="dashed")) +
+      ggtitle("Carbon Dioxide Removal") +
+      ylab(expression(paste("Mt ", CO[2],"e"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/png/CDR_LU_GS_line.png"), g[["CDR_LU_GS_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["CDR_LU_GS_line"]]
+```
+
+
+## Power sector emissions
+
+```{r CO2_electricitySupply, echo=FALSE, include=FALSE}
+# paper plot
+  plotData <- df %>%
+    filter(variable == "Emissions|CO2|Energy|Supply|Electricity",
+           period >=2005, period <= 2050,
+           scenario %in% c("WP1 NetZero"),
+           region == "EU27 & UK (*)")
+  
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Emi|CO2|Energy|Supply|Electricity w/ couple prod",
+           region == "EUR",
+           model == "Ember")
+  
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+  
+  g[["CO2_electricitySupply"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
       ggtitle("Electricity Supply CO2 emissions") +
       ylab(expression(paste("Mt ", CO[2]))) +
       theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
@@ -480,6 +1796,65 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   g[["CO2_electricitySupply"]]
 ```
 
+### Power sector emissions - range plot
+
+```{r power_sector_co2_emi_range, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Emissions|CO2|Energy|Supply|Electricity",
+#           period %in% c(2010,2020,2030,2040,2050),
+           period %in% seq(2005,2050,5),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Emi|CO2|Energy|Supply|Electricity w/ couple prod",
+           region == "EUR",
+           model == "Ember")
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["Elec_CO2_Emi_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+#    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Electricity Supply CO2 Emissions") +
+    ylab(expression(paste("Mt ", CO[2]))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/Elec_CO2_Emi_range.svg"), g[["Elec_CO2_Emi_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Elec_CO2_Emi_range.png"), g[["Elec_CO2_Emi_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Elec_CO2_Emi_range"]]
+```
+
 ## Power sector emissions - fewer models
 
 ```{r CO2_electricitySupply_filtered, echo=FALSE, include=FALSE}
@@ -489,20 +1864,30 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
            model %in% c("IMAGE","MEESA","PRIMES","PROMETHEUS","REMIND"),
-#           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
            region == "EU27 & UK (*)")
 #           region %in% c("EU27 & UK (*)","EUR"))
   
-  histDataOrigN <- histOrigN %>%
+  plotDataHistOrigN <- histOrigN %>%
     filter(variable == "Emi|CO2|Energy|Supply|Electricity w/ couple prod",
            region == "EUR",
            model == "Ember")
   
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+  
   g[["CO2_electricitySupplyFewerModels"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
       geom_line(size=1,aes(linetype=model, color = "grey")) +
-      geom_line(data=histDataOrigN, size=3,linetype="solid", color = "black") +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
 #      geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
 #      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
@@ -527,20 +1912,30 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   plotData <- df %>%
     filter(variable %in% c("Carbon Removal","Carbon Removal|Land Use","Carbon Removal|Geological Storage"),
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
 
-  histPlotDataOrigN <- histOrigN %>%
+  plotDataHistOrigN <- histOrigN %>%
     filter(variable == "Emi|CO2|Land-Use Change",
            region == "EUR",
            model == "UNFCCC") %>%
     mutate(value = -1 * value)
+  
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
 
   g[["CDR_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
       geom_line(size=1,aes(color=model,linetype=variable)) +
-      geom_line(data=histPlotDataOrigN, size=3,linetype="solid", color = "black") +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
@@ -560,13 +1955,13 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
 
 ### Carbon Capture line plot
 ```{r CC_line, echo=FALSE, include=FALSE}
-
+# paper plot
   plotData <- df %>%
     filter(variable %in% c("Carbon Capture", "Carbon Capture|Biomass", "Carbon Capture|Fossil", "Carbon Capture|Direct Air Capture", "Carbon Capture|Industrial Process"),
            variable %in% c("Carbon Capture"),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MEESA","MESSAGE","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)")
 
   g[["CC_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
@@ -582,7 +1977,7 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
       theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
             plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/CC_line.png"), g[["CC_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/CarbonCapture_line.png"), g[["CC_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
     quantile(filter(plotData, period == 2030)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles    
     quantile(filter(plotData, period == 2040)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles     
     quantile(filter(plotData, period == 2050)[["value"]], c(0, 0.25, 0.5, 0.75, 1)) # give out interquartiles 
@@ -591,14 +1986,68 @@ df <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 DiffRepTocalc`" = "`Emissio
   g[["CC_line"]]
 ```
 
+### Carbon Capture line plot - range plot
+
+```{r Carbon_Capture_line_plot, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Carbon Capture",
+#           period %in% c(2010,2020,2030,2040,2050),
+           period %in% seq(2020,2050,5),
+           model %in% modelsPowerEmi2040,
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  g[["CarbonCapture_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+#    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+    labs(title="Carbon Capture") +
+      ylab(expression(paste("Mt ", CO[2],"/yr")))
+  
+
+  ggsave(paste0("./output/", time, "/svg/CarbonCapture_range_range.svg"), g[["CarbonCapture_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/CarbonCapture_range_range.png"), g[["CarbonCapture_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["CarbonCapture_range"]]
+```
+
 ### CCarbon Capture origin stacked bar
 ```{r, echo=FALSE, include=FALSE}
+# paper plot
+modelsToShow <- modelsPowerEmi2040  
 
 vars <- c(
+  "Other" = "Carbon Capture|Other",
   "Direct Air Capture"="Carbon Capture|Direct Air Capture", 
   "Biomass"="Carbon Capture|Biomass",
-  "Fossil" = "Carbon Capture|Fossil",
-  "Industrial Process"="Carbon Capture|Industrial Processes")
+  "Industrial Process"="Carbon Capture|Industrial Processes",
+  "Fossil" = "Carbon Capture|Fossil"
+  )
 
 carrier_color <- c(  
   "Direct Air Capture" = "#5ed5f0",
@@ -610,20 +2059,32 @@ carrier_color <- c(
     filter(variable %in% vars,
            period %in% c(2030,2040,2050),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           model %in% modelsToShow,
            region == "EU27 & UK (*)") %>%
-    mutate(value = value * 1, # EJ
-           model = factor(model, levels = c("LIMES", "Euro-Calliope","IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+    mutate(model = factor(model, levels = modelsToShow),
            variable = factor(variable, levels = vars)) #order
-  
+
+  plotDataTotals <- df %>%
+  filter(variable == "Carbon Capture",
+         period %in% c(2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsToShow,
+         region == "EU27 & UK (*)") %>%
+  mutate(model = factor(model, levels = modelsToShow)
+  ) #order
+
   g[["CC_origin_StBar"]] <- ggplot(plotData,aes(x=model,y=value,fill=variable)) +
     geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
     geom_bar(stat='identity', alpha = 0.8) +
+    geom_point(data = plotDataTotals, aes(x=model, y = value), 
+                colour = "black", size = 4, shape = 18) + 
 #    coord_cartesian(ylim = c(0, 120)) +
     facet_wrap(~period,nrow=1) +
     theme_minimal(base_size = 24) +
     scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
-    ggtitle("CC by origin") +
+    ggtitle("Carbon Capture by origin") +
     ylab("Mt CO2/yr") +
     theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
           axis.title.x=element_blank(),
@@ -636,53 +2097,49 @@ carrier_color <- c(
   g[["CC_origin_StBar"]]
 ```
 
-## non-CO2 Emissions
+## non-CO2 Emissions as reported
 
-```{r nonCO2_emissions, echo=FALSE, include=FALSE}
+```{r Emi_nonCO2reported_line, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
     filter(variable == "Emi|Kyoto Gases|non-CO2 calc",
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MESSAGE","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)")
 
-#  histDataOrigN <- histOrigN %>%
-#    filter(variable == "Emi|GHG|w/ Bunkers",
-#           region == "EUR",
-#           model == "UNFCCC")
-  
-  g[["Emi_nonCO2_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+  g[["Emi_nonCO2reported_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
       geom_line(size=1,aes(color=model,linetype=model)) +
-#      geom_line(data=histDataOrigN, size=3,linetype="solid", color = "black") +
-      geom_line(data=histData, size=3,linetype="solid", color = "red") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
       scale_linetype_manual(values = modelLinetype) +
-#      scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
-      ggtitle("non-CO2 Emissions") +
+      ggtitle("non-CO2 Emissions (reported)") +
       ylab(expression(paste("Mt ", CO[2],"eq/yr"))) +
       theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
             plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/Emi_nonCO2_line.png"), g[["Emi_nonCO2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Emi_nonCO2reported_line.png"), g[["Emi_nonCO2reported_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["Emi_nonCO2_line"]]
+  g[["Emi_nonCO2reported_line"]]
 ```
 
 # Carbon prices {.tabset}
 ## Carbon price line plot
 ```{r CarbonPrice_line, echo=FALSE, include=FALSE}
-
+# paper plot
   plotData <- df %>%
-    filter(variable == "Price|Carbon",
-           period >=2005, period <= 2050,
+    filter(variable == "Price|Carbon",    #"Price|Carbon (weighted by Final Energy)
+           period >=2015, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsPowerEmi2040,
            region == "EU27 & UK (*)")
 
   g[["CarbonPrice_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
@@ -710,72 +2167,6 @@ carrier_color <- c(
 ```
 
 # Shares {.tabset}
-
-## calculate additional variables 
-```{r calculate_Elecshares, echo=FALSE, include = FALSE}
-
-  df <- calc_addVariable(df, "`Final Energy|Electricity Share`" = "`Final Energy|Electricity` / `Final Energy`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Electricity Share woBunkers woNonEnergy`" = "(`Final Energy|Electricity` - `Final Energy|Bunkers|Electricity`) / (`Final Energy` - `Final Energy|Bunkers` - `Final Energy|Non-Energy Use`)", units = "%", completeMissing = TRUE)
-  
-#forRunning  histOrigN <- calc_addVariable(histOrigN, "`Final Energy|Electricity Share woBunkers woNonEnergy`" = "(`FE|Electricity`) / (`FE` - `FE|Transport|Bunkers` - `FE|Non-energy Use|Industry`)", units = "%", completeMissing = TRUE)
-#forRunning  histOrigN <- calc_addVariable(histOrigN, "`Final Energy|Electricity Share`" = "`FE|Electricity` / `FE`", units = "%", completeMissing = TRUE)
-  
-  df <- calc_addVariable(df, "`Final Energy|Industry|Electricity Share`" = "`Final Energy|Industry|Electricity` / `Final Energy|Industry`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Electricity Share`" = "`Final Energy|Residential and Commercial|Electricity` / `Final Energy|Residential and Commercial`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Transportation|Electricity Share`" = "`Final Energy|Transportation|Electricity` / `Final Energy|Transportation`", units = "%")
-  
-    df <- calc_addVariable(df, "`Final Energy|Nonelectric`" = "`Final Energy` - `Final Energy|Electricity`", units = "%")
-#    df <- calc_addVariable(df, "`UE|Nonelectric`" = "`Final Energy|Nonelectric`", units = "%")     
-#    df <- calc_addVariable(df, "`UE|Nonelectric`" = "`Final Energy|Nonelectric`", units = "%") 
-
-```
-
-```{r calculate_H2hares, echo=FALSE, include = FALSE}
-  df <- calc_addVariable(df, "`Final Energy|Hydrogen Share`" = "`Final Energy|Hydrogen` / `Final Energy`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Hydrogen Share woBunkers woNonEnergy`" = "(`Final Energy|Hydrogen` - `Final Energy|Bunkers|Hydrogen` - `Final Energy|Non-Energy Use|Hydrogen`) / (`Final Energy` - `Final Energy|Bunkers` - `Final Energy|Non-Energy Use`)", units = "%", completeMissing = TRUE)
-  
-  df <- calc_addVariable(df, "`Final Energy|Industry|Hydrogen Share`" = "`Final Energy|Industry|Hydrogen` / `Final Energy|Industry`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Residential and Commercial|Hydrogen Share`" = "`Final Energy|Residential and Commercial|Hydrogen` / `Final Energy|Residential and Commercial`", units = "%")
-  df <- calc_addVariable(df, "`Final Energy|Transportation|Hydrogen Share`" = "`Final Energy|Transportation|Hydrogen` / `Final Energy|Transportation`", units = "%")
-```
-
-```{r calculate_SEshares, echo=FALSE, include = FALSE}
-
-  if("Trade|Secondary Energy|Liquids|Electricity|Volume" %in% unique(df$variable))
-    df <- calc_addVariable(df, "`SE-Import|Liquids|Synfuel`" = " -`Trade|Secondary Energy|Liquids|Electricity|Volume`", units = "EJ/yr")
-  df <- calc_addVariable(df, "`SE-Import|Liquids|Fossil`" = " -`Trade|Secondary Energy|Liquids|Oil|Volume` - `Trade|Secondary Energy|Liquids|Coal|Volume` - `Trade|Secondary Energy|Liquids|Gas|Volume`", units = "EJ/yr")
-  df <- calc_addVariable(df, "`SE-Import|Liquids|Bio`" = " -`Trade|Secondary Energy|Liquids|Biomass|Volume` ", units = "EJ/yr")
-  
-  df <- calc_addVariable(df, "`SE|Liquids|Bio Share`" = "`Secondary Energy|Liquids|Biomass` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Liquids|Synfuel Share`" = "`Secondary Energy|Liquids|Electricity` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Liquids|Fossil Share`" = "`Secondary Energy|Liquids|Fossil` / `Secondary Energy|Liquids`", units = "%", completeMissing = TRUE)
-  
-  df <- calc_addVariable(df, "`SE|Liquids|SumOfShares`" = "`SE|Liquids|Fossil Share` + `SE|Liquids|Bio Share` + `SE|Liquids|Synfuel Share`", units = "%", completeMissing = TRUE)
-    
-  df <- calc_addVariable(df, "`SE|Gases|Bio Share`" = "`Secondary Energy|Gases|Biomass` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Gases|Synfuel Share`" = "`Secondary Energy|Gases|Electricity` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Gases|Fossil Share`" = "`Secondary Energy|Gases|Fossil` / `Secondary Energy|Gases`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Gases|SumOfShares`" = "`SE|Gases|Fossil Share` + `SE|Gases|Bio Share` + `SE|Gases|Synfuel Share`", units = "%", completeMissing = TRUE)
-   
-  df <- calc_addVariable(df, "`SE|Solids|Bio Share`" = "`Secondary Energy|Solids|Biomass` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Solids|Coal Share`" = "`Secondary Energy|Solids|Coal` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Solids|Fossil Share`" = "`Secondary Energy|Solids|Fossil` / `Secondary Energy|Solids`", units = "%", completeMissing = TRUE)
-  df <- calc_addVariable(df, "`SE|Solids|SumOfShares`" = "`SE|Solids|Fossil Share` + `SE|Solids|Bio Share`", units = "%", completeMissing = TRUE)
-```
-
-```{r calculate_SEshares_2, echo=FALSE, include = FALSE}
-df <- calc_addVariable(df, "`SE|SolLiqGas`" = "`Secondary Energy|Liquids` + `Secondary Energy|Solids` + `Secondary Energy|Gases`", units = "%")
-df <- calc_addVariable(df, "`SE|SolLiqGas|Bio`" = "`Secondary Energy|Liquids|Biomass` + `Secondary Energy|Solids|Biomass` + `Secondary Energy|Gases|Biomass`", units = "%", completeMissing = TRUE)
-df <- calc_addVariable(df, "`SE|SolLiqGas|Fossil`" = "`Secondary Energy|Liquids|Fossil` + `Secondary Energy|Solids|Fossil` + `Secondary Energy|Gases|Fossil`", units = "%", completeMissing = TRUE)
-df <- calc_addVariable(df, "`SE|SolLiqGas|Synfuel`" = "`Secondary Energy|Liquids|Electricity` +  `Secondary Energy|Gases|Electricity`", units = "%", completeMissing = TRUE)
-
-
-df <- calc_addVariable(df, "`SE|SolLiqGas|Synfuel Share`" = "`SE|SolLiqGas|Synfuel` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
-df <- calc_addVariable(df, "`SE|SolLiqGas|Fossil Share`" = "`SE|SolLiqGas|Fossil` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
-df <- calc_addVariable(df, "`SE|SolLiqGas|Bio Share`" = "`SE|SolLiqGas|Bio` / `SE|SolLiqGas`", units = "%", completeMissing = TRUE)
-df <- calc_addVariable(df, "`SE|SolLiqGas|SumOfShares`" = "`SE|SolLiqGas|Fossil Share` + `SE|SolLiqGas|Bio Share` + `SE|SolLiqGas|Synfuel Share`", units = "%", completeMissing = TRUE)
-```
-
 
 
 ## Final Energy Sector Stacked Bars
@@ -845,6 +2236,8 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% names(varTosector),
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
     mutate(sector = factor(varTosector[as.character(variable)]))
@@ -877,6 +2270,8 @@ carrier_color <- c(
   
   plotData <- df %>%
     filter(variable == "Final Energy|Electricity Share",
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
@@ -906,11 +2301,13 @@ carrier_color <- c(
 ## Final Energy Electricity share total woBunker wo NonEnergy
 
 ```{r Final_Energy_Electricity_Share_Total_woBunkwoNonEn, echo=FALSE, include=FALSE}
-  
+# paper plot  
   plotData <- df %>%
     filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
            period >=2005, period <= 2050,
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           model %in% modelsFullSystem,
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
 
@@ -920,19 +2317,34 @@ carrier_color <- c(
            model == "Eurostat energy_sheets",
            scenario %in% c("historical"),
            region == "EUR")
+    plotDataHistIEA <- histOrigN %>%
+    filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
+           period >=2005, period <= 2050,
+           model == "IEA",
+           scenario %in% c("historical"),
+           region == "EUR")
+  
+    plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+#   geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+#   geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
 
    g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
       geom_line(size=1,aes(color=model,linetype=model)) +
- #     geom_line(data=plotDataHist, size=3,linetype="solid", color = "black") +
+#      geom_line(data=plotDataHist, size=3,linetype="solid", color = "black") +
+      geom_line(data=plotDataHistIEA, size=3,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_y_continuous(labels = scales::percent_format(accuracy = 1), breaks = seq(0, 1, by = 0.2), limits = c(0,1)) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
       scale_linetype_manual(values = modelLinetype) +
 #      scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
-      ggtitle("Share of Electricity in Final Energy Use (%)") +
+      ggtitle("Share of Electricity in Final Energy Use (w/o Bunk&nonEn) (%)") +
       ylab(expression(paste("(%)"))) +
       theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
             plot.background = element_rect(fill="#FFFFFF", color = NA))
@@ -948,6 +2360,151 @@ carrier_color <- c(
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn"]]
 ```
+
+## Final Energy Electricity share total woBunker wo NonEnergy - range
+```{r Final_Energy_Electricity_share, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
+#           period %in% c(2010,2020,2030,2040,2050),
+           period %in% seq(2005,2050,5),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           !(model %in% c("MESSAGE","Euro-Calliope","LIMES","OSeMBE","MEESA")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
+           region == "EUR",
+           model == "Eurostat energy_sheets")
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+#    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Share of Electricity in Final Energy (w/o Bunk&nonEn)") +
+    ylab(expression(paste("[%]"))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range.svg"), g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range.png"), g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Final_Energy_Electricity_Share_Total_woBunkwoNonEn_range"]]
+```
+
+
+## Final Energy Elec & H2 share total woBunker wo NonEnergy - range
+```{r Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
+#           period %in% c(2010,2020,2030,2040,2050),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           period %in% seq(2005,2050,5),
+           !(model %in% c("MESSAGE","Euro-Calliope","LIMES","OSeMBE","MEESA")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+ plotData2 <- df %>%
+    filter(variable == "Final Energy|Hydrogen Share woBunkers woNonEnergy",
+           period %in% seq(2005,2050,5),
+           !(model %in% c("MESSAGE","Euro-Calliope","LIMES","OSeMBE","MEESA")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Final Energy|Electricity Share woBunkers woNonEnergy",
+           region == "EUR",
+           model == "Eurostat energy_sheets")
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    geom_ribbon(data = plotData2,aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#78ece9") +
+    geom_line(data = plotData2,aes(y=Median), linewidth=1,color="#53ccc9") +
+    theme(axis.title.x=element_blank()) +
+#    theme(legend.position="top") +
+        theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+#    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Share of Electricity in Final Energy (w/o Bunk&nonEn)") +
+    ylab(expression(paste("[%]"))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range.svg"), g[["Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range.png"), g[["Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Final_Energy_Elec_and_H2_Share_Total_woBunkwoNonEn_range"]]
+```
+
+
+
 
 ## Final Energy Electricity share total woBunker wo NonEnergy and sectors
 
@@ -973,7 +2530,7 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% names(varTosector),
            period >=2005, period <= 2050,
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
     mutate(sector = factor(varTosector[as.character(variable)]))
@@ -1018,6 +2575,9 @@ carrier_color <- c(
    plotData <- df %>%
     filter(variable %in% names(varTosector),
            period >=2005, period <= 2050,
+           model != "Euro-Calliope",
+          model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
     mutate(sector = factor(varTosector[as.character(variable)]))
@@ -1050,6 +2610,8 @@ carrier_color <- c(
   
   plotData <- df %>%
     filter(variable == "Final Energy|Hydrogen Share",
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
@@ -1085,6 +2647,8 @@ carrier_color <- c(
   
   plotData <- df %>%
     filter(variable == "Final Energy|Transportation|Hydrogen Share",
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
 #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
@@ -1121,14 +2685,14 @@ carrier_color <- c(
 
 
 
-## Final Energy Electricity share total woBunker wo NonEnergy
+## Final Energy Hydrogen share total woBunker wo NonEnergy
 
 ```{r Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn, echo=FALSE, include=FALSE}
   
   plotData <- df %>%
     filter(variable == "Final Energy|Hydrogen Share woBunkers woNonEnergy",
            period >=2005, period <= 2050,
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
 
@@ -1163,9 +2727,74 @@ carrier_color <- c(
     quantile(filter(plotData, period == 2050)[["value"]], c(0, 0.25, 0.5, 0.75, 1))*100 # give out interquartiles 
 
 ```
+
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn"]]
 ```
+
+## Final Energy Hydrogen share total woBunker wo NonEnergy - range
+```{r Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn_range, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Final Energy|Hydrogen Share woBunkers woNonEnergy",
+#           period %in% c(2010,2020,2030,2040,2050),
+           period %in% seq(2005,2050,5),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           !(model %in% c("MESSAGE","Euro-Calliope","LIMES","OSeMBE","MEESA")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "Final Energy|Hydrogen Share woBunkers woNonEnergy",
+           region == "EUR",
+           model == "Eurostat energy_sheets")
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+#    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Share of Hydrogen in Final Energy") +
+    ylab(expression(paste("[%]"))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/Final_Energy_H2_Share_Total_woBunkwoNonEn_range.svg"), g[["Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Final_Energy_H2_Share_Total_woBunkwoNonEn_range.png"), g[["Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Final_Energy_Hydrogen_Share_Total_woBunkwoNonEn_range"]]
+```
+
+
+
 ## SE bio-synfuel-fossil shares stacked bars
 
 ### Liquids
@@ -1227,6 +2856,8 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2030,2040,2050),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
     mutate(value = value * 1, # EJ
@@ -1271,6 +2902,8 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2030,2040,2050),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
            region == "EU27 & UK (*)") %>%
     mutate(value = value * 1, # EJ
@@ -1298,7 +2931,7 @@ carrier_color <- c(
   g[["SE_Solids_Mix_Origin"]]
 ```
 
-### Sol + Liq + Gas in SE
+## Sol + Liq + Gas in SE
 ```{r, echo=FALSE, include=FALSE}
 
 vars <- c(
@@ -1345,8 +2978,10 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2030,2040,2050),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)") %>%
     mutate(value = value * 1, # EJ
            model = factor(model, levels = c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
@@ -1373,19 +3008,10 @@ carrier_color <- c(
   g[["SE_GasLiqSol_Mix_Origin"]]
 ```
 
-### Sol + Liq + Gas in FE
+## Sol + Liq + Gas in FE
 ```{r, echo=FALSE, include=FALSE}
-
-# vars <- c(
-#     "BioGas"="Final Energy|Gases|Biomass",
-#   "SynGas" = "Final Energy|Gases|Electricity",
-#   "FossGas"="Final Energy|Gases|Fossil",
-#   "BioLiq"="Final Energy|Liquids|Biomass",
-#   "Synliq" = "Final Energy|Liquids|Electricity",
-#   "FossLiq"="Final Energy|Liquids|Fossil",
-#     "BioSolids"="Final Energy|Solids|Biomass",
-#   "FossSolids"="Final Energy|Solids|Fossil"
-#   )
+# paper plot
+modelsToShow <- modelsFullSystem
 
 vars <- c(               # other stacking order for nicer fossil/bio/syn-split
   "SynGases" = "Final Energy|Gases|Electricity",
@@ -1408,23 +3034,34 @@ carrier_color <- c(
   "BioGases" = "#33ed27",
   "FossGases" = "#c8c8c8")
 
-#,"MESSAGE"
   plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2030,2040,2050),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsToShow,
            region == "EU27 & UK (*)") %>%
     mutate(value = value * 1, # EJ
-           model = factor(model, levels = c("IMAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+           model = factor(model, levels = modelsToShow),
            variable = factor(variable, levels = vars)) #order
   
+plotDataTotals <- df %>%
+  filter(variable == "FE|SolLiqGas",
+         period %in% c(2020,2030,2040,2050),
+         scenario == "WP1 NetZero",
+         model %in% modelsToShow,
+         region == "EU27 & UK (*)") %>%
+  mutate(model = factor(model, levels = modelsToShow) ) #order  
+
   g[["FE_GasLiqSol_Mix_Origin"]] <- ggplot(plotData,aes(x=model,y=value,fill=variable)) +
     geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
     geom_bar(stat='identity', alpha = 0.8) +
 #    coord_cartesian(ylim = c(0, 120)) +
     facet_wrap(~period,nrow=1) +
     theme_minimal(base_size = 24) +
+    geom_point(data = plotDataTotals, aes(x=model, y = value), 
+                colour = "black", size = 4, shape = 18) + 
     scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
     ggtitle("Gas + Liq + Sol by origin") +
     ylab("EJ/yr") +
@@ -1433,7 +3070,24 @@ carrier_color <- c(
           panel.background = element_rect(fill="#FFFFFF", color = NA),
           plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/FE_GasLiqSol_Mix_Origin.png"), g[["FE_GasLiqSol_Mix_Origin"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/FE_GasLiqSol_Mix_Origin.png"), g[["FE_GasLiqSol_Mix_Origin"]] , device="png", width = 9, height = 8, dpi=100, units = "in")
+  
+  checkBioShares <- filter(df,scenario == "WP1 NetZero", variable == "FE|SolLiqGas|Bio Share", !model %in% c("Euro-Calliope","PROMETHEUS"))
+  pivot_periods(checkBioShares)
+  checkFossShares <- filter(df,scenario == "WP1 NetZero", variable == "FE|SolLiqGas|Fossil Share", !model %in% c("Euro-Calliope","PROMETHEUS"))
+  pivot_periods(checkFossShares)
+  checkFossUse <- filter(df,scenario == "WP1 NetZero", variable == "FE|SolLiqGas|Fossil", !model %in% c("Euro-Calliope","PROMETHEUS"))
+  pivot_periods(checkFossUse)
+  checkCarbonFEUse <- filter(df,scenario == "WP1 NetZero", variable == "FE|SolLiqGas reduction vs 2020", !model %in% c("Euro-Calliope"))
+  pivot_periods(checkCarbonFEUse)
+  
+  QuartFossUse <- checkFossUse %>%
+    group_by(period) %>%
+    summarise_at(vars(value), listForQuartiles )
+  
+  QuartCarbonFEUse <- checkCarbonFEUse %>%
+    group_by(period) %>%
+    summarise_at(vars(value), listForQuartiles )
   
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
@@ -1448,7 +3102,7 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% c("SE|Liquids|Bio Share","SE|Liquids|Synfuel Share", "SE|Liquids|Fossil Share", "SE|Liquids|SumOfShares"),
            period >=2005, period <= 2050,
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)")
 
@@ -1574,6 +3228,8 @@ carrier_color <- c(
   plotData <- df %>%
     filter(variable %in% c("Secondary Energy|Hydrogen","Secondary Energy|Electricity"),
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
            region == "EU27 & UK (*)") 
 
@@ -1598,32 +3254,35 @@ carrier_color <- c(
   g[["SE_H2_line"]]
 ```
 
-## SE H2 line
+## SEFE H2 line
 
 ```{r SEFE_H2_line, echo=FALSE, include=FALSE}
 
-  plotData <- df %>%
-    filter(variable %in% c("Final Energy|Hydrogen","Secondary Energy|Hydrogen"),
-           period >=2005, period <= 2050,
-           scenario %in% c("WP1 NetZero"),
-           region == "EU27 & UK (*)") 
+plotData <- df %>%
+  filter(variable %in% c("Final Energy|Hydrogen","Secondary Energy|Hydrogen"),
+         period >=2005, period <= 2050,
+         model != "PRIMES" | period != 2005,
+         model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+         model != "Euro-Calliope",
+         scenario %in% c("WP1 NetZero"),
+         region == "EU27 & UK (*)") 
 
- g[["SEFE_H2_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
-      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) + 
-#      coord_cartesian(ylim = c(0, 8000)) +
-      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
-      geom_line(size=1,aes(color=model,linetype=variable)) +
-      geom_point(aes(color=model)) +
-      theme_minimal(base_size = 24) +
-      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
-      scale_linetype_manual(values = c("Final Energy|Hydrogen"="longdash","Secondary Energy|Hydrogen"="solid")) +
-      ggtitle("Hydrogen production") +
-      ylab(expression(paste("[EJ/yr]"))) +
-      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
-            plot.background = element_rect(fill="#FFFFFF", color = NA))
+g[["SEFE_H2_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+  geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) + 
+  #      coord_cartesian(ylim = c(0, 8000)) +
+  geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+  geom_line(size=1,aes(color=model,linetype=variable)) +
+  geom_point(aes(color=model)) +
+  theme_minimal(base_size = 24) +
+  scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+  scale_linetype_manual(values = c("Final Energy|Hydrogen"="longdash","Secondary Energy|Hydrogen"="solid")) +
+  scale_y_continuous("[EJ/yr]", sec.axis = sec_axis(~ . * 8.4, name = "Mt H2/yr")) +
+  ggtitle("Hydrogen production") +
+  theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+        plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/SEFE_H2_line.png"), g[["SEFE_H2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
-  quantile(filter(plotData, period == 2040)[["value"]], c(0.25, 0.5, 0.75)) # give out interquartiles
+ggsave(paste0("./output/", time, "/png/SEFE_H2_line.png"), g[["SEFE_H2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+quantile(filter(plotData, period == 2040)[["value"]], c(0.25, 0.5, 0.75)) # give out interquartiles
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
   g[["SEFE_H2_line"]]
@@ -1631,30 +3290,120 @@ carrier_color <- c(
 
 # Electricty {.tabset}
 
-## NetZero
+## FE elec demand line
+```{r FE_elec_dem_line, echo=FALSE, include=FALSE}
 
+  plotData <- df %>%
+    filter(variable == "Final Energy|Electricity",
+           period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           scenario %in% c("WP1 NetZero"),
+           region == "EU27 & UK (*)") %>%
+  mutate(value = value * convertEJ2TWh)
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "FE|Electricity",
+           region == "EUR",
+           model == "IEA") %>%
+  mutate(value = value * convertEJ2TWh)
+
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+
+  g[["FE_elec_dem"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +      
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+      ggtitle("Electricity demand") +
+      ylab(expression(paste("TWh/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/FE_elec_dem.svg"), g[["FE_elec_dem"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/FE_elec_dem.png"), g[["FE_elec_dem"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["FE_elec_dem"]]
+```
+
+## SE elec gen line
+```{r sE_elec_gen_line, echo=FALSE, include=FALSE}
+
+  plotData <- df %>%
+    filter(variable == "Secondary Energy|Electricity",
+           period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           scenario %in% c("WP1 NetZero"),
+           region == "EU27 & UK (*)") %>%
+  mutate(value = value * convertEJ2TWh)
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "SE|Electricity",
+           region == "EUR",
+           model %in% c("IEA","Ember")) %>%
+  mutate(value = value * convertEJ2TWh)
+
+  plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+
+  g[["sE_elec_gen_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +      
+      geom_line(data=plotDataHistAv, size=2,linetype="solid", color = "black") +
+      geom_point(data=plotDataHistAv, shape=17 , size=7, color = "black") +
+      geom_line(size=1,aes(color=model,linetype=model)) +
+      geom_line(data=plotDataHistOrigN, size=1,linetype="solid", color = "black") +
+      geom_point(aes(color=model)) +
+      theme_minimal(base_size = 24) +
+      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
+      scale_linetype_manual(values = modelLinetype) +
+      ggtitle("Electricity demand") +
+      ylab(expression(paste("TWh/yr"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/sE_elec_gen_line.svg"), g[["sE_elec_gen_line"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/sE_elec_gen_line.png"), g[["sE_elec_gen_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["sE_elec_gen_line"]]
+```
+## StackedBars NetZero
 ```{r, echo=FALSE, include=FALSE}
-
-# fill missing OSEMBE Solar data
-df <- calc_addVariable(df, "`Secondary Energy|Electricity|Solar`" = "`Secondary Energy|Electricity|Solar|PV` + `Secondary Energy|Electricity|Solar|CSP`", units = "EJ/yr", completeMissing = TRUE)
-# df <- calc_addVariable(df, "`Secondary Energy|Electricity|SolarOldMinusNew`" = "`Secondary Energy|Electricity|Solar` - `Secondary Energy|Electricity|SolarNew`", units = "EJ/yr", completeMissing = TRUE)
-
+# paper plot
 vars <- c(
 #  "Curtailment"="Secondary Energy|Electricity|Curtailment",
+  "Trade"="Trade|Secondary Energy|Electricity|Volume",
   "Ocean" = "Secondary Energy|Electricity|Ocean",
-  "Biomass"="Secondary Energy|Electricity|Biomass",
-  "Coal"="Secondary Energy|Electricity|Coal",
-  "Gas"="Secondary Energy|Electricity|Gas",
-  "Geothermal"="Secondary Energy|Electricity|Geothermal",
-  "Hydro"="Secondary Energy|Electricity|Hydro",
-  "Hydrogen"="Secondary Energy|Electricity|Hydrogen",
-  "Nuclear"="Secondary Energy|Electricity|Nuclear",
-  "Oil"="Secondary Energy|Electricity|Oil",
   "Solar"="Secondary Energy|Electricity|Solar",
   "Wind"="Secondary Energy|Electricity|Wind",
+  "Geothermal"="Secondary Energy|Electricity|Geothermal",
+  "Hydro"="Secondary Energy|Electricity|Hydro",
+  "Biomass"="Secondary Energy|Electricity|Biomass",
+  "Hydrogen"="Secondary Energy|Electricity|Hydrogen",
+  "Nuclear"="Secondary Energy|Electricity|Nuclear",
+  "Gas"="Secondary Energy|Electricity|Gas",
+  "Oil"="Secondary Energy|Electricity|Oil",
+  "Coal"="Secondary Energy|Electricity|Coal"
   #"Wind Offshore"="Secondary Energy|Electricity|Wind|Offshore",
   #"Wind Onshore"="Secondary Energy|Electricity|Wind|Onshore",
-  "Trade"="Trade|Secondary Energy|Electricity|Volume"
 )
 
 carrier_color <- c(  
@@ -1706,28 +3455,112 @@ carrier_color <- c(
 
 ```
 
-## VRE share in Electricity
-```{r add_variables_VRE, echo=FALSE, include=FALSE}
+## Capacity StackedBars NetZero
+```{r, echo=FALSE, include=FALSE}
 
+vars <- c(
+  "Ocean" = "Capacity|Electricity|Ocean",
+  "Solar"="Capacity|Electricity|Solar",
+  "Wind"="Capacity|Electricity|Wind",
+  "Storage"="Capacity|Electricity|Storage|Power",
+  "Geothermal"="Capacity|Electricity|Geothermal",
+  "Hydro"="Capacity|Electricity|Hydro",
+  "Biomass"="Capacity|Electricity|Biomass",
+  "Hydrogen"="Capacity|Electricity|Hydrogen",
+  "Nuclear"="Capacity|Electricity|Nuclear",
+  "Gas"="Capacity|Electricity|Gas",
+  "Oil"="Capacity|Electricity|Oil",
+  "Coal"="Capacity|Electricity|Coal"
+)
 
-  df <- calc_addVariable(df, "`Secondary Energy|Electricity|WindSolar`" = "`Secondary Energy|Electricity|Wind` + `Secondary Energy|Electricity|Solar`", units = "EJ/yr")
-  df <- calc_addVariable(df, "`Secondary Energy|Electricity|Sum`" = "`Secondary Energy|Electricity|Ocean` + `Secondary Energy|Electricity|Biomass` + `Secondary Energy|Electricity|Coal` + `Secondary Energy|Electricity|Gas` + `Secondary Energy|Electricity|Geothermal` + `Secondary Energy|Electricity|Hydro` + `Secondary Energy|Electricity|Hydrogen` + `Secondary Energy|Electricity|Nuclear` + `Secondary Energy|Electricity|Oil` + `Secondary Energy|Electricity|WindSolar` ", units = "EJ/yr")
-  df <- calc_addVariable(df, "`Secondary Energy|Electricity|DiffToSum`" = "`Secondary Energy|Electricity` - `Secondary Energy|Electricity|Sum`", units = "EJ/yr")
-  df <- calc_addVariable(df, "`Secondary Energy|Electricity|VRE Share`" = "`Secondary Energy|Electricity|WindSolar` / `Secondary Energy|Electricity`", units = "%")
+carrier_color <- c(  
+  "Ocean" = "#5ed5f0",
+  "Biomass" = "#005900",
+  "Coal" = "#0c0c0c",
+  "Gas" = "#999959",
+  "Geothermal" = "#e51900",
+  "Hydro" = "#191999",
+  "Hydrogen"    = "#5ed5b0",
+  "Nuclear" = "#ff33ff",
+  "Oil" = "#b30000",
+  "Solar" = "#ffcc00",
+  "Wind" = "#337fff",
+  "Storage" = "#f57242")
 
+###########
+  HistVarsList <- list(
+  "Capacity|Electricity|Ocean"           = c("Cap|Electricity|Ocean"               ),
+  "Capacity|Electricity|Solar"           = c("Cap|Electricity|Solar"               ),
+  "Capacity|Electricity|Wind"            = c("Cap|Electricity|Wind"                ),
+  "Capacity|Electricity|Storage|Power"   = c("Cap|Electricity|Storage"             ),
+  "Capacity|Electricity|Geothermal"      = c("Cap|Electricity|Geothermal"          ),
+  "Capacity|Electricity|Hydro"           = c("Cap|Electricity|Hydro"               ),
+  "Capacity|Electricity|Biomass"         = c("Cap|Electricity|Biomass"             ),
+  "Capacity|Electricity|Hydrogen"        = c("Cap|Electricity|Hydrogen"            ),
+  "Capacity|Electricity|Nuclear"         = c("Cap|Electricity|Nuclear"             ),
+  "Capacity|Electricity|Gas"             = c("Cap|Electricity|Gas"                 ),
+  "Capacity|Electricity|Oil"             = c("Cap|Electricity|Oil"                 ),
+  "Capacity|Electricity|Coal"            = c("Cap|Electricity|Coal"                )
+  )
   
-  # histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|Sum`" = "`SE|Electricity|Coal` + `SE|Electricity|Biomass` + `SE|Electricity|Gas` + `SE|Electricity|Hydro` + `SE|Electricity|Nuclear` + `SE|Electricity|Wind` + `SE|Electricity|Solar` ", units = "EJ/yr")
-  # histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|DiffToSum`" = "`SE|Electricity` - `SE|Electricity|Sum`", units = "EJ/yr")
-  histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|WindSolar`" = "`SE|Electricity|Wind` + `SE|Electricity|Solar`", units = "EJ/yr")
-  histOrigN <- calc_addVariable(histOrigN, "`SE|Electricity|VRE Share`" = "`SE|Electricity|WindSolar` / `SE|Electricity`", units = "%")
+  varToNewVar <- setNames(names(unlist(HistVarsList)),unlist(HistVarsList))
+  
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable %in% names(varToNewVar),
+           region == "EUR",
+           model == "Ember") %>%
+   mutate(variable = factor(varToNewVar[as.character(variable)]), 
+           scenario = factor("WP1 NetZero"),
+           model = factor("historical"),
+   )
+
+##########
+
+  plotData <- df %>%
+    filter(variable %in% vars,
+           period %in% c(2020,2030,2040,2050),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)") %>%
+    mutate(model = factor(model, levels = c("LIMES", "Euro-Calliope","IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+           variable = factor(variable, levels = vars)) #order
+
+    plotDataAll <- rbind(filter(plotDataHistOrigN,period == 2020), plotData )  
+  
+    plotDataAllreorder <- plotDataAll %>%
+    mutate(model = factor(model, levels = c("historical","LIMES", "Euro-Calliope","IMAGE","MEESA","MESSAGE","OSeMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+           variable = factor(variable, levels = vars)) #order
+      
+  g[["Elec_Capacity_NZero"]] <- ggplot(plotDataAllreorder,aes(x=model,y=value,fill=variable)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_bar(stat='identity', alpha = 0.8) +
+    facet_wrap(~period,nrow=1) +
+    theme_minimal(base_size = 24) +
+    scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
+    ggtitle("Capacity") +
+    ylab("GW") +
+    theme(axis.text.x = element_text(size = 10, angle = 90, hjust = 1, vjust = 0.5),
+          axis.title.x=element_blank(),
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA))
+
+  ggsave(paste0("./output/", time, "/svg/Elec_Capacity_NZero.svg"), g[["Elec_Capacity_NZero"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Elec_Capacity_NZero.png"), g[["Elec_Capacity_NZero"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  
 ```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["Elec_Capacity_NZero"]]
+
+```
+## VRE share in Electricity
 
 ```{r SE_Electricity_VRE_Share, echo=FALSE, include=FALSE}
-
+# paper plot
   
   plotData <- df %>%
     filter(variable == "Secondary Energy|Electricity|VRE Share",
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
 #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
            region == "EU27 & UK (*)")
@@ -1761,16 +3594,81 @@ carrier_color <- c(
 
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["SE_Electricity_VRE_Share"]]
+g[["SE_Electricity_VRE_Share"]]
+```
+
+### VRE share - range plot
+
+```{r vre_share, echo=FALSE, include=FALSE}
+
+#PRIMES is not reporting Emissions|Kyoto Gases
+
+  plotData <- df %>%
+    filter(variable == "Secondary Energy|Electricity|VRE Share",
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           period %in% seq(2005,2050,5),
+           !(model %in% c("MESSAGE","Euro-Calliope","WITCH")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "SE|Electricity|VRE Share",
+           region == "EUR",
+           model == "Ember")
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["SE_Electricity_VRE_Share_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Share of Solar and Wind in Electricity Generation") +
+    ylab(expression(paste("[%]"))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/SE_Electricity_VRE_Share_range.svg"), g[["SE_Electricity_VRE_Share_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/SE_Electricity_VRE_Share_range.png"), g[["SE_Electricity_VRE_Share_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["SE_Electricity_VRE_Share_range"]]
 ```
 
 ## VRE electricity generation
 
 ```{r SE_Electricity_VRE, echo=FALSE, include=FALSE}
-
+# paper plot
   plotData <- df %>%
     filter(variable == "Secondary Energy|Electricity|WindSolar",
            period >=2005, period <= 2050,
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
            scenario %in% c("WP1 NetZero"),
 #           scenario %in% c("WP1 NPI", "WP1 NetZero", "WP1 NetZero-LimBio", "WP1 NetZero-LimCCS", "WP1 NetZero-LimNuc"),
            region == "EU27 & UK (*)") %>%
@@ -1810,7 +3708,73 @@ carrier_color <- c(
   g[["SE_Electricity_VRE"]]
 ```
 
-## Calculate expansion of electricity generation from biomass/Hydro
+### VRE elec - range plot
+
+```{r VRE_elec_range, echo=FALSE, include=FALSE}
+
+#PRIMES is not reporting Emissions|Kyoto Gases
+
+  plotData <- df %>%
+    filter(variable == "Secondary Energy|Electricity|WindSolar",
+#           period %in% c(2010,2020,2030,2040,2050),
+           period %in% seq(2005,2050,5),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           !(model %in% c("MESSAGE","Euro-Calliope","WITCH")),
+           scenario == "WP1 NetZero",
+           region == "EU27 & UK (*)" ) %>%
+    mutate(value = value*277.7777778) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+#      Median = median,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75)))
+
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable == "SE|Electricity|WindSolar",
+           region == "EUR",
+           model == "Ember")
+  plotDataHistOrigN <- bind_rows(plotDataHistOrigN, mutate(filter(plotDataHistOrigN, period == 2023), period = 2024, value = 3.18))
+  plotDataHistOrigNsum <- plotDataHistOrigN %>%
+    mutate(Median = value*277.7777778)
+ #   summarise_at(vars(value), list(
+  #    Median = value))
+
+  g[["SE_Electricity_VRE_range"]] <- 
+    ggplot(plotData,aes(x=period,y=Median)) +
+    geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
+    geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
+    geom_line(linewidth=1,color="black") +
+    geom_ribbon(aes(ymax = Q3, ymin = Q1), alpha = 0.5, fill = "#545454") +
+#        geom_ribbon(aes(ymax = Max, ymin = Min), alpha = 0.5, fill = "#545454") +
+#    geom_line(aes(y=Min),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+#    geom_line(aes(y=Max),linewidth=1,color="#545454",linetype = "dashed", alpha = 0.7) +
+    theme_minimal(base_size = 24) +
+#    scale_y_continuous(n.breaks = 8,labels = scales::percent_format(accuracy = 1)) +  
+    scale_x_continuous(n.breaks = 8) + 
+    theme(axis.title.x=element_blank()) +
+    theme(legend.position="none",
+          panel.background = element_rect(fill="#FFFFFF", color = NA),
+          plot.background = element_rect(fill="#FFFFFF", color = NA)) +
+    geom_line(data=plotDataHistOrigNsum, aes(y=Median), size=3,linetype="solid", color = "black") +
+    labs(title="Electricity Generation from Solar and Wind") +
+    ylab(expression(paste("[TWh/yr]"))) 
+  
+
+  ggsave(paste0("./output/", time, "/svg/SE_Electricity_VRE_range.svg"), g[["SE_Electricity_VRE_range"]] , device="svg", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/SE_Electricity_VRE_range.png"), g[["SE_Electricity_VRE_range"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+
+```
+```{r, echo=FALSE, fig.width=12, fig.height=8}
+  g[["SE_Electricity_VRE_range"]]
+```
+
+<!-- ## Calculate expansion of electricity generation from biomass/Hydro -->
 
 ```{r SE_Electricity_bio_hydro, echo=FALSE, include=FALSE}
 
@@ -1895,7 +3859,7 @@ plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2050),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)") %>%
   mutate(carrierLevel = ifelse(variable %in% seVars, "se", "fe"),
          label = ifelse(variable %in% seVars, invSe[as.character(variable)], invFe[as.character(variable)]),
@@ -1997,7 +3961,7 @@ plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2050),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)") %>%
   mutate(carrierLevel = ifelse(variable %in% seVars, "se", "fe"),
          label = ifelse(variable %in% seVars, invSe[as.character(variable)], invFe[as.character(variable)]),
@@ -2038,7 +4002,7 @@ plotDataTotals <-  df %>%
     filter(variable %in% varsTotals,
            period %in% c(2020,2050),
            scenario == "WP1 NetZero",
-           model %in% c("IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model %in% modelsFullSystem,
            region == "EU27 & UK (*)") %>%
   mutate(carrierLevel = ifelse(variable %in% seTotals, "se", "fe"),
          label = ifelse(variable %in% seTotals, invSeTotals[as.character(variable)], invFeTotals[as.character(variable)]),
@@ -2134,24 +4098,24 @@ g[["FE_GasLiqSol_Mix_SE_FE_new"]] <- ggplot(plotDatafewModels,aes(x=type, y=valu
 ```
 
 # Trade
+ # ignore Euro-Calliope (only allows h2 trade, so no imports in 2020) and all supply models
 
 ## Trade flows Stacked Bars
-
 ```{r, echo=FALSE, include=FALSE}
-
+# paper plot
 vars <- c(
   "SE Elec" = "Trade|Secondary Energy|Electricity|Volume",
   "SE H2" = "Trade|Secondary Energy|Hydrogen|Volume",
-  "SE Liq|Bio" = "Trade|Secondary Energy|Liquids|Biomass|Volume",
   "SE Liq|Coal" = "Trade|Secondary Energy|Liquids|Coal|Volume",
-  "SE Liq|Oil" = "Trade|Secondary Energy|Liquids|Oil|Volume",
   "SE Liq|Elec" = "Trade|Secondary Energy|Liquids|Electricity|Volume",
   "SE Liq|H2" = "Trade|Secondary Energy|Liquids|Hydrogen|Volume",
+  "SE Sol|Bio" = "Trade|Secondary Energy|Solids|Biomass|Volume",
+  "SE Liq|Bio" = "Trade|Secondary Energy|Liquids|Biomass|Volume",
   "PE Bio"="Trade|Primary Energy|Biomass|Volume",
   "PE Coal" = "Trade|Primary Energy|Coal|Volume",
   "PE Gas"="Trade|Primary Energy|Gas|Volume",
+  "SE Liq|Oil" = "Trade|Secondary Energy|Liquids|Oil|Volume",
   "PE Oil"="Trade|Primary Energy|Oil|Volume")
-
 
 carrier_color <- c(  
   "PE Bio"      = "#005900",
@@ -2160,24 +4124,73 @@ carrier_color <- c(
   "PE Oil"      = "#e51900",
   "SE Elec"     = "#fff300",
   "SE H2"       = "#00ffe4",
-  "SE Liq|Bio"  = "#80a569",
+  "SE Sol|Bio"  = "#388d00",
+  "SE Liq|Bio"  = "#9deb00",
   "SE Liq|Coal" = "#828a7d",
-  "SE Liq|Oil"  = "#bd945b",
-  "SE Liq|Elec" = "#e7e760",
+  "SE Liq|Oil"  = "#f4786d",
+  "SE Liq|Elec" = "#95dfdd",
   "SE Liq|H2"   = "#95dfdd")
 
+  HistVarsList <- list(
+    "Trade|Primary Energy|Coal|Volume"=c("Trade|Coal"),
+    "Trade|Primary Energy|Oil|Volume"=c("Trade|Oil"),
+    "Trade|Primary Energy|Gas|Volume"=c("Trade|Gas")
+  )
+  
+  varToNewVar <- setNames(names(unlist(HistVarsList)),unlist(HistVarsList))
+  
+  plotDataHistOrigN <- histOrigN %>%
+    filter(variable %in% names(varToNewVar),
+           region == "EUR",
+           model == "IEA") %>%
+   mutate(variable = factor(varToNewVar[as.character(variable)]), 
+           scenario = factor("WP1 NetZero"),
+           model = factor("historical"),
+   )
+
+    plotDataHistAv <- mappingForAveraging %>%
+    left_join(plotDataHistOrigN, by = c("year" = "period")) %>%
+    group_by(model, scenario, region, period, variable, unit) %>%
+    dplyr::summarise(value = mean(.data$value, na.rm = TRUE)) %>%
+    ungroup()
+    
   plotData <- df %>%
     filter(variable %in% vars,
            period %in% c(2020,2030,2040,2050),
            scenario == "WP1 NetZero",
-           region == "EU27 & UK (*)") %>%
-    mutate(value = value * - 1, # EJ 2 TWh
-           model = factor(model, levels = c("LIMES", "IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
+           model %in% modelsFullSystem,
+           region == "EU27 & UK (*)") 
+
+ TradeAgg <- df %>%
+    filter(variable == "Trade|Energy",
+           period %in% c(2020,2030,2040,2050),
+           scenario == "WP1 NetZero",
+           model %in% modelsFullSystem,
+           region == "EU27 & UK (*)")
+calcInfo <- TradeAgg %>%
+   mutate (value = - value) %>%
+    group_by(period) %>%
+    summarise_at(vars(value), list(
+      Min = min,
+      Mean = mean,
+      Median = median,
+      Max = max,
+      Sd = sd,
+      Q1=~quantile(., probs = 0.25),
+      Q3=~quantile(., probs = 0.75))) 
+
+TradeAgg_wide <- pivot_wider(TradeAgg,names_from = period, values_from = value)
+  
+ plotDataAll <- rbind(filter(plotDataHistOrigN,period == 2020), plotData )  
+  
+plotDataAllreorder <- plotDataAll %>%
+    mutate(value = value * - 1, 
+           model = factor(model, levels = c("historical","IMAGE","MESSAGE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH")),
            variable = factor(variable, levels = vars)) #order
   
-  g[["Trade"]] <- ggplot(plotData,aes(x=model,y=value,fill=variable)) +
+  g[["Trade"]] <- ggplot(plotDataAllreorder,aes(x=model,y=value,fill=variable)) +
     geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
-    geom_bar(stat='identity', alpha = 0.8) +
+    geom_bar(stat='identity',  alpha = 0.8) +
     facet_wrap(~period,nrow=1) +
     theme_minimal(base_size = 24) +
     scale_fill_manual(values = setNames(carrier_color[names(vars)],vars), labels = setNames(names(vars), vars)) +
@@ -2188,7 +4201,7 @@ carrier_color <- c(
           panel.background = element_rect(fill="#FFFFFF", color = NA),
           plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/Trade.png"), g[["Trade"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
+  ggsave(paste0("./output/", time, "/png/Trade.png"), g[["Trade"]] , device="png", width = 9, height = 8, dpi=100, units = "in")
   
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
@@ -2196,252 +4209,44 @@ carrier_color <- c(
 ```
 
 
-```{r, echo=FALSE}
 
-### LULUCF
+# Costs 
 
-# It is necessary to check also if hist data covers all years 
-hist_lulucf <- histOrigN %>% 
-  filter(variable == "Emi|CO2|Land-Use Change",
-         period >= 2018, period <= 2022,
-         region == "EUR",
-         model == "UNFCCC") %>%
-  summarize(Mean = mean(value, na.rm=TRUE)) %>%
-  pull(Mean)
-
-# Type 1: Model has AFOLU CO2 data reported (equivalent to LULUCF). 
-df_type1_orig <- df %>% # reported afolu data models
-  filter(variable == "Emissions|CO2|AFOLU",
-         period %in% c(2020,2030,2040,2050),
-         scenario == "WP1 NetZero",
-         region == "EU27 & UK (*)") %>%
-  group_by(model) %>%
-  filter(sum(value*value) != 0) %>%
-  ungroup()
-
-model_w_lulucf <- df_type1_orig %>%
-  pull(model) %>%
-  unique()
-
-df_lulucf_adj <- left_join( # calculating adjustment factors based on 2020 historical values
-  df_type1_orig,
-  df_type1_orig %>%
-    filter(period == 2020) %>%
-    mutate(hist2020 = hist_lulucf,
-           multFactor = hist_lulucf / value,
-           diffFactor = hist_lulucf - value) %>%
-    select(-period, -value),
-  by = join_by(model == model, scenario == scenario, region == region, variable == variable, unit == unit)
-  ) %>%
-  mutate(
-    valueAdjMult = value * multFactor,
-    valueAdjDiff = value + diffFactor
-  )
-
-df_lulucf_w_data <- df_lulucf_adj %>% # calculating the adjusted data using the difference between historical values to translate the model values instead of using a multiplicative factor
-  mutate(value = valueAdjDiff) %>%
-  select(model, scenario, region, variable, unit, period, value)
-
-# Type 2: Model has no CO2 AFOLU data reported
-model_wo_lulucf <- df %>% filter(!(model %in% model_w_lulucf)) %>% pull(model) %>% unique() 
-
-df_lulucf_wo_data <- full_join( #assigning synthetic value to Emissions|CO2|AFOLU
-  df_lulucf_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
-  data.frame(model=rep(model_wo_lulucf,each=4), period=rep(c(2020,2030,2040,2050),length(model_wo_lulucf)), value = rep(c(hist_lulucf, -310, -310, -310),length(model_wo_lulucf))),
-  by = join_by(period == period)
-  )
-
-# Synthetic CO2 AFOLU data
-df_lulucf <- rbind(
-  df_lulucf_w_data,
-  df_lulucf_wo_data
-  ) %>%
-  mutate(variable = "Emissions|CO2|AFOLU synthetic")
-
-
-### non GHG
-
-hist_nonCO2 <- histOrigN %>% 
-  filter(period >= 2018, period <= 2022,
-         region == "EUR",
-         model == "UNFCCC") %>%
-  calc_addVariable("`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr", only.new = TRUE) %>% 
-  summarize(Mean = mean(value, na.rm=TRUE)) %>%
-  pull(Mean)
-
-# Type A: Models that include non-CO2 emissions
-model_w_nonCO2 <- df %>% # reported afolu data models
-  filter(variable == "Emissions|Kyoto Gases",
-         period %in% c(2020,2030,2040,2050),
-         scenario == "WP1 NetZero",
-         region == "EU27 & UK (*)") %>%
-  group_by(model) %>%
-  filter(sum(value*value) != 0) %>%
-  ungroup() %>%
-  pull(model) %>%
-  unique()
-
-df_nonCO2_w_data <- calc_addVariable(df, "`Emi|Kyoto Gases|non-CO2 calc`" = "`Emissions|Kyoto Gases` - `Emissions|CO2`", units = "MtCO2e/yr", only.new = TRUE) %>%
-  filter(period %in% c(2020,2030,2040,2050),
-         scenario == "WP1 NetZero",
-         region == "EU27 & UK (*)",
-         model %in% model_w_nonCO2) 
-
-# Type B: Model has no GHG data reported
-model_wo_nonCO2 <- df %>% filter(!(model %in% model_w_nonCO2)) %>% pull(model) %>% unique() 
-
-df_nonCO2_wo_data <- full_join( #assigning synthetic value to Emissions|CO2|AFOLU
-  df_nonCO2_w_data %>% ungroup() %>% select(-model, -value) %>% unique(),
-  data.frame(model=rep(model_wo_nonCO2,each=4), period=rep(c(2020,2030,2040,2050),length(model_wo_nonCO2)), value = rep(c(hist_nonCO2, 580, 520, 510),length(model_wo_nonCO2))),
-  by = join_by(period == period)
-  )
-
-# Synthetic CO2 AFOLU data
-df_nonCO2 <- rbind(
-  df_nonCO2_w_data,
-  df_nonCO2_wo_data
-  ) %>%
-  mutate(variable = "Emissions|Kyoto Gases|non-CO2 synthetic")
-
-# adding synthetic data to main data
-df <- rbind(
-  df %>% filter(!(variable %in% c("Emissions|CO2|AFOLU synthetic","Emissions|Kyoto Gases|non-CO2 synthetic"))),
-  df_lulucf,
-  df_nonCO2
-  )
-
-```
-
-# Synthetic data {.tabset}
-## Synthetic LULUCF line plot
-```{r lulucf_line, echo=FALSE, include=FALSE}
+```{r Costs, echo=FALSE, include=FALSE}
 
   plotData <- df %>%
-    filter(variable == "Emissions|CO2|AFOLU synthetic",
+    filter(variable %in% c("Carbon Removal|Synthetic AFOLU total","Carbon Removal|Geological Storage"),
            period >=2005, period <= 2050,
            scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
+           model != "PRIMES" | period != 2005,
+           model != "TIAM-ECN" | ! (period %in% c(2005,2010,2015) ),
+           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH") ,
            region == "EU27 & UK (*)")
 
-
-  histDataOrigN <- histOrigN %>%
+  histPlotDataOrigN <- histOrigN %>%
     filter(variable == "Emi|CO2|Land-Use Change",
            region == "EUR",
-           model == "UNFCCC")
-  
-  g[["lulucf_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
-      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
-      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
-      geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
-      geom_point(aes(color=model)) +
-      theme_minimal(base_size = 24) +
-      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
-      scale_linetype_manual(values = modelLinetype) +
-#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
-      ggtitle("LULUCF (synthetic)") +
-      ylab("Mt CO2/yr") +
-      theme(axis.title.x=element_blank(),
-          panel.background = element_rect(fill="#FFFFFF", color = NA),
-          plot.background = element_rect(fill="#FFFFFF", color = NA))
-
-  ggsave(paste0("./output/", time, "/png/lulucf_line.png"), g[["lulucf_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
-  
-```
-```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["lulucf_line"]]
-```
-
-## Synthetic non-CO2 emissions line plot
-```{r nonCO2_line, echo=FALSE, include=FALSE}
-
-  plotData <- df %>%
-    filter(variable == "Emissions|Kyoto Gases|non-CO2 synthetic",
-           period >=2005, period <= 2050,
-           scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
-           region == "EU27 & UK (*)")
-
-  histDataOrigN <- histOrigN %>%
-    filter(region == "EUR",
            model == "UNFCCC") %>%
-    calc_addVariable("`Emi|Kyoto Gases|non-CO2 calc`" = "`Emi|GHG` - `Emi|CO2`", units = "MtCO2e/yr", only.new = TRUE)
-  
-  g[["nonCO2_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
+    mutate(value = -1 * value)
+
+  g[["CDR_LU_GS_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
       geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
       geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
-      geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
+      geom_line(size=1,aes(color=model,linetype=variable)) +
+      geom_line(data=histPlotDataOrigN, size=3,linetype="solid", color = "black") +
       geom_point(aes(color=model)) +
       theme_minimal(base_size = 24) +
       scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
-      scale_linetype_manual(values = modelLinetype) +
-#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
-      ggtitle("non-CO2 emissions (synthetic)") +
-      ylab("Mt CO2e/yr") +
-      theme(axis.title.x=element_blank(),
-          panel.background = element_rect(fill="#FFFFFF", color = NA),
-          plot.background = element_rect(fill="#FFFFFF", color = NA))
+      scale_linetype_manual(values = c("Carbon Removal|Synthetic AFOLU total"="solid", "Carbon Removal|Geological Storage"="dashed")) +
+      ggtitle("Carbon Dioxide Removal") +
+      ylab(expression(paste("Mt ", CO[2],"e"))) +
+      theme(panel.background = element_rect(fill="#FFFFFF", color = NA),
+            plot.background = element_rect(fill="#FFFFFF", color = NA))
 
-  ggsave(paste0("./output/", time, "/png/nonCO2_line.png"), g[["nonCO2_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
-  
+  ggsave(paste0("./output/", time, "/png/CDR_LU_GS_line.png"), g[["CDR_LU_GS_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
 ```
 ```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["nonCO2_line"]]
+  g[["CDR_LU_GS_line"]]
 ```
 
-
-
-```{r, echo=FALSE, include=FALSE}
-
-  df <- rbind(
-    df %>% filter(variable != "Emissions|Kyoto Gases synthetic"),
-    df %>%
-      filter(variable %in% c("Emissions|CO2|Energy and Industrial Processes" , "Emissions|CO2|Other" , "Emissions|CO2|Waste" , "Emissions|CO2|Other Removal" , "Emissions|CO2|AFOLU synthetic" , "Emissions|Kyoto Gases|non-CO2 synthetic")) %>%
-      group_by(model, scenario, region, period) %>%
-      summarize(value = sum(value)) %>%
-      mutate(variable = "Emissions|Kyoto Gases synthetic",
-             unit = "MtCO2e/yr") %>%
-      relocate(any_of(colnames(df)))
-    )
-  
-```
-
-## Synthetic GHG emissions line plot
-```{r syntheticGHG_line, echo=FALSE, include=FALSE}
-
-  plotData <- df %>%
-    filter(variable == "Emissions|Kyoto Gases synthetic",
-           period >=2005, period <= 2050,
-           scenario %in% c("WP1 NetZero"),
-           model %in% c("IMAGE","MEESA","OSEMBE","PRIMES","PROMETHEUS","REMIND","TIAM-ECN","WITCH"),
-           region == "EU27 & UK (*)")
-
-  histDataOrigN <- histOrigN %>%
-    filter(region == "EUR",
-           model == "UNFCCC",
-           variable == "Emi|GHG")
-  
-  g[["GHG_synthetic_line"]] <- ggplot(plotData,aes(x=period,y=value)) +
-      geom_hline(yintercept=0, color = "black", linewidth=1, alpha = 0.5) +
-      geom_vline(xintercept=2020, color = "black", linewidth=1, alpha = 0.5,linetype="dashed") +
-      geom_line(size=1,aes(color=model,linetype=model)) +
-      geom_line(data=histDataOrigN, size=1,linetype="solid", color = "black") +
-      geom_point(aes(color=model)) +
-      theme_minimal(base_size = 24) +
-      scale_color_manual(values = setNames(color[levels(plotData$model)],levels(plotData$model))) +
-      scale_linetype_manual(values = modelLinetype) +
-#     scale_linetype_manual(values = c("historical"="solid","WP1 NPI"="solid", "WP1 NetZero"="solid")) +
-      ggtitle("GHG emissions (synthetic)") +
-      ylab("Mt CO2e/yr") +
-      theme(axis.title.x=element_blank(),
-          panel.background = element_rect(fill="#FFFFFF", color = NA),
-          plot.background = element_rect(fill="#FFFFFF", color = NA))
-
-  ggsave(paste0("./output/", time, "/png/GHG_synthetic_line.png"), g[["GHG_synthetic_line"]] , device="png", width = 12, height = 8, dpi=100, units = "in")
-  
-```
-```{r, echo=FALSE, fig.width=12, fig.height=8}
-  g[["GHG_synthetic_line"]]
-```
 
